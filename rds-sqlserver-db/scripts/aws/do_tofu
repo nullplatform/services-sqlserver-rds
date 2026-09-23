@@ -1,0 +1,56 @@
+#!/bin/bash
+set -euo pipefail
+
+TOFU_ACTION="${TOFU_ACTION:-apply}"
+
+if [ "${LINK_NEVER_CREATED:-}" = "true" ] || [ "${SETUP_SKIPPED:-}" = "true" ]; then
+  echo "Skipping tofu ${TOFU_ACTION} — setup was not completed."
+  exit 0
+fi
+
+if [ -z "${TOFU_MODULE_DIR:-}" ]; then
+  echo "TOFU_MODULE_DIR not set — skipping tofu ${TOFU_ACTION}."
+  exit 0
+fi
+
+if ! command -v tofu &>/dev/null; then
+  TOFU_VERSION="1.12.6"
+  TOFU_BIN_DIR="/tmp/np-tofu-bin"
+  TOFU_BIN="$TOFU_BIN_DIR/tofu"
+
+  if [ ! -f "$TOFU_BIN" ]; then
+    echo "tofu not found in PATH, installing v${TOFU_VERSION} to ${TOFU_BIN_DIR}..."
+    mkdir -p "$TOFU_BIN_DIR"
+    curl -fsSL \
+      "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip" \
+      -o /tmp/tofu.zip
+    unzip -qo /tmp/tofu.zip tofu -d "$TOFU_BIN_DIR"
+    chmod +x "$TOFU_BIN"
+    rm -f /tmp/tofu.zip
+    echo "tofu installed: $("$TOFU_BIN" version | head -1)"
+  else
+    echo "Using cached tofu at ${TOFU_BIN}"
+  fi
+
+  export PATH="$TOFU_BIN_DIR:$PATH"
+fi
+
+cd "$OUTPUT_DIR"
+
+cp -r "$TOFU_MODULE_DIR"/* .
+
+echo "Running: tofu init"
+# shellcheck disable=SC2086
+tofu init $TOFU_INIT_VARIABLES
+
+TOFU_TARGET_FLAGS=""
+if [ -n "${TOFU_TARGETS:-}" ]; then
+  IFS=',' read -ra _TARGETS <<< "$TOFU_TARGETS"
+  for target in "${_TARGETS[@]}"; do
+    TOFU_TARGET_FLAGS="$TOFU_TARGET_FLAGS -target=$target"
+  done
+fi
+
+echo "Running: tofu $TOFU_ACTION"
+# shellcheck disable=SC2086
+tofu "$TOFU_ACTION" -auto-approve $TOFU_VARIABLES $TOFU_TARGET_FLAGS

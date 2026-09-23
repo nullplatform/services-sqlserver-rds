@@ -1,0 +1,27 @@
+# RDS SQL Server Database — static configuration, not exposed in the NP UI.
+#
+# NOTE: In scripts, $VALUES is a FILE PATH (set by np service workflow exec
+#       --values). It is NOT JSON content. Read values with yaml_value().
+
+# AWS region where the tfstate bucket and app credentials secret live.
+region: us-east-1
+
+# Named AWS profile for local testing (e.g. an SSO profile with RDS access).
+# Run "aws sso login --profile <name>" before starting np-agent locally.
+aws_profile: ""
+
+# Optional. When set, server auto-discovery is narrowed to services created
+# from this specification. Leave empty to rely on the master secret prefix,
+# which already distinguishes a SQL Server instance from a SQL Server one.
+server_specification_id: ""
+
+# Connection flags passed to every sqlcmd invocation. Leave empty for the
+# default (-b --encrypt-connection true --trust-server-certificate). Override
+# only if a go-sqlcmd release changes how --encrypt-connection is spelled.
+sqlcmd_connect_flags: ""
+
+# Provider categories the platform must resolve into CONTEXT.providers before
+# running workflow steps. identity-access-control is required by
+# scripts/aws/assume_role_step to look up the AssumeRole target ARN.
+provider_categories:
+  - identity-access-control

@@ -1,0 +1,30 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib"
+
+if [ "${LINK_NEVER_CREATED:-}" = "true" ]; then
+  echo "Link was never created successfully — nothing to revoke."
+  exit 0
+fi
+
+if [ -z "${DB_NAME:-}" ] || [ -z "${DB_USERNAME:-}" ]; then
+  echo "DB_NAME or DB_USERNAME not set — nothing to revoke."
+  exit 0
+fi
+
+validate_identifier "database name" "$DB_NAME"
+validate_identifier "database username" "$DB_USERNAME"
+
+fetch_master_credentials "$MASTER_SECRET_ARN"
+
+echo "Revoking database access for ${DB_USERNAME} on ${DB_NAME}..."
+
+sqlcmd_exec "$DB_NAME" "$SERVICE_PATH/sql/set_role_members.sql" \
+  -v DbUser="$DB_USERNAME" \
+  -v WantRead=0 \
+  -v WantWrite=0 \
+  -v WantDdl=0
+
+echo "Access revoked. The database, login and user are preserved at service level."

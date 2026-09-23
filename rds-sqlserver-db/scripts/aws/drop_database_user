@@ -1,0 +1,30 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib"
+
+if [ "${SETUP_SKIPPED:-}" = "true" ]; then
+  echo "Skipping user cleanup — service was never created."
+  exit 0
+fi
+
+if [ -z "${DB_NAME:-}" ] || [ -z "${DB_USERNAME:-}" ]; then
+  echo "DB_NAME or DB_USERNAME not set — skipping user cleanup."
+  exit 0
+fi
+
+validate_identifier "database name" "$DB_NAME"
+validate_identifier "database username" "$DB_USERNAME"
+
+fetch_master_credentials "$MASTER_SECRET_ARN"
+
+echo "Dropping user ${DB_USERNAME} from ${DB_NAME} and its server login..."
+
+sqlcmd_exec "$DB_NAME" "$SERVICE_PATH/sql/drop_user.sql" \
+  -v DbUser="$DB_USERNAME"
+
+sqlcmd_exec master "$SERVICE_PATH/sql/drop_login.sql" \
+  -v DbUser="$DB_USERNAME"
+
+echo "User cleanup complete. Database ${DB_NAME} preserved."

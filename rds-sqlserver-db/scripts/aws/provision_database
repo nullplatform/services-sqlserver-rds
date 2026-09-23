@@ -1,0 +1,38 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib"
+
+if [ "${SETUP_SKIPPED:-}" = "true" ]; then
+  echo "Skipping database provisioning — setup was not completed."
+  exit 0
+fi
+
+validate_identifier "database name" "${DB_NAME:-}"
+validate_identifier "database username" "${DB_USERNAME:-}"
+
+cd "$OUTPUT_DIR"
+
+DB_PASSWORD=$(tofu output -raw db_password 2>/dev/null) \
+  || die "could not read db_password from the db_setup module outputs"
+
+if [ -z "$DB_PASSWORD" ]; then
+  die "db_password output is empty — did the db_setup module apply successfully?"
+fi
+
+validate_password "$DB_PASSWORD"
+
+fetch_master_credentials "$MASTER_SECRET_ARN"
+
+echo "Provisioning database ${DB_NAME} and login ${DB_USERNAME} on ${DB_HOST}..."
+
+sqlcmd_exec master "$SERVICE_PATH/sql/create_database_and_login.sql" \
+  -v DbName="$DB_NAME" \
+  -v DbUser="$DB_USERNAME" \
+  -v DbPassword="$DB_PASSWORD"
+
+sqlcmd_exec "$DB_NAME" "$SERVICE_PATH/sql/create_user.sql" \
+  -v DbUser="$DB_USERNAME"
+
+echo "Database provisioning complete."
