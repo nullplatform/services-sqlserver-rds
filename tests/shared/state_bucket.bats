@@ -81,7 +81,7 @@ MOCK
     echo \"B=\$TFSTATE_BUCKET\"; echo \"P=\$TFSTATE_KEY_PREFIX\""
   [ "$status" -eq 0 ]
   [[ "$output" == *"B=${BUCKET}"* ]]
-  [[ "$output" == *"P=services/${SERVICE_ID}/"* ]]
+  [[ "$output" == *"P=services/rds-sqlserver/${SERVICE_ID}/"* ]]
 }
 
 @test "cleanup refuses to run with an empty prefix" {
@@ -96,16 +96,16 @@ MOCK
 
 @test "cleanup scopes its listing to this instance's prefix" {
   export TFSTATE_BUCKET="$BUCKET"
-  export TFSTATE_KEY_PREFIX="services/${SERVICE_ID}/"
+  export TFSTATE_KEY_PREFIX="services/rds-sqlserver/${SERVICE_ID}/"
   run "$DB_SERVICE_PATH/scripts/aws/delete_tfstate_objects"
   [ "$status" -eq 0 ]
-  run grep -c -- "--prefix services/${SERVICE_ID}/" "$MOCK_LOG"
+  run grep -c -- "--prefix services/rds-sqlserver/${SERVICE_ID}/" "$MOCK_LOG"
   [ "$output" = "2" ]
 }
 
 @test "cleanup never deletes the bucket itself" {
   export TFSTATE_BUCKET="$BUCKET"
-  export TFSTATE_KEY_PREFIX="services/${SERVICE_ID}/"
+  export TFSTATE_KEY_PREFIX="services/rds-sqlserver/${SERVICE_ID}/"
   run "$DB_SERVICE_PATH/scripts/aws/delete_tfstate_objects"
   [ "$status" -eq 0 ]
   run grep -c "delete-bucket" "$MOCK_LOG"
@@ -116,7 +116,7 @@ MOCK
   for svc in rds-sqlserver-db rds-sqlserver-server; do
     run grep -c 'RDS_SQL_SERVER_S3_STATE_BUCKET' "$REPO_ROOT/${svc}/scripts/aws/build_context"
     [ "$output" = "3" ]
-    run grep -c 'TFSTATE_KEY_PREFIX="services/${SERVICE_ID}/"' "$REPO_ROOT/${svc}/scripts/aws/build_context"
+    run grep -c 'TFSTATE_KEY_PREFIX="services/rds-sqlserver/${SERVICE_ID}/"' "$REPO_ROOT/${svc}/scripts/aws/build_context"
     [ "$output" = "1" ]
   done
 }
@@ -132,6 +132,13 @@ MOCK
   while IFS= read -r line; do
     [[ "$line" == *"/tmp/np-service-"* ]] || [[ "$line" == *"np-tofu-bin"* ]]
   done <<< "$output"
+}
+
+@test "the prefix groups every instance of this service type together" {
+  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/build_context' >/dev/null 2>&1; echo \"\$TFSTATE_KEY_PREFIX\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == "services/rds-sqlserver/"* ]]
+  [[ "$output" == *"/${SERVICE_ID}/" ]]
 }
 
 @test "the IAM modules grant the named bucket and no wildcard" {

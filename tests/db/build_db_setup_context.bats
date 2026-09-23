@@ -10,7 +10,7 @@ setup() {
   export VALUES="$DB_SERVICE_PATH/values.yaml"
   export OUTPUT_DIR="$BATS_TEST_TMPDIR/work"
   export TFSTATE_BUCKET="acme-tofu-state"
-  export TFSTATE_KEY_PREFIX="services/svc-1/"
+  export TFSTATE_KEY_PREFIX="services/rds-sqlserver/svc-1/"
   export CONTEXT='{"service":{"id":"svc-1"},"type":"update","entity_nrn":"organization=1:account=2"}'
 
   export SERVER_HOSTNAME="sql.example.rds.amazonaws.com"
@@ -60,7 +60,7 @@ run_and_dump() {
 @test "the backend key is namespaced under this instance's prefix" {
   run_and_dump
   [[ "$output" == *"-backend-config=bucket=acme-tofu-state"* ]]
-  [[ "$output" == *"-backend-config=key=services/svc-1/db_setup.tfstate"* ]]
+  [[ "$output" == *"-backend-config=key=services/rds-sqlserver/svc-1/db_setup.tfstate"* ]]
 }
 
 @test "a stored database name that is not a valid identifier aborts" {

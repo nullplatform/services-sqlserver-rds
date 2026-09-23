@@ -67,7 +67,7 @@ survive, so access can be re-granted later.
 ## Terraform state
 
 State lives in the bucket named by `RDS_SQL_SERVER_S3_STATE_BUCKET`, under
-`services/<service-id>/`. The variable is required and the bucket must already
+`services/rds-sqlserver/<service-id>/`. The variable is required and the bucket must already
 exist. See the repository README for the full picture, and pass the same name
 as `state_bucket_name` to `specs/requirements/aws`.
 

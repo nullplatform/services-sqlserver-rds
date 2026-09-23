@@ -79,8 +79,13 @@ Discovery can be narrowed further with `server_specification_id` in
 
 Set `RDS_SQL_SERVER_S3_STATE_BUCKET` on the agent to the name of an existing S3
 bucket. Every instance of both services keeps its state there under
-`services/<service-id>/`, so one bucket covers the whole repository and the
-service id keeps the keys apart.
+`services/rds-sqlserver/<service-id>/`, so one bucket covers the whole
+repository and the service id keeps the keys apart.
+
+The `rds-sqlserver` segment groups every instance of this engine under one
+place in the bucket, next to the other service families that share it
+(`services/rds-postgres/`, `services/dynamo/`, and so on), rather than leaving
+bare service ids at the root.
 
 The variable is **required** — without it every action fails before touching
 AWS, so there is no fallback path to keep working. The bucket must already
