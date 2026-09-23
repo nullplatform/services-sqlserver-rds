@@ -72,24 +72,24 @@ fi
 
 echo "Using VPC: ${VPC_ID}"
 
-TFSTATE_BUCKET="np-service-${SERVICE_ID}"
-
-if ! aws s3api head-bucket --bucket "$TFSTATE_BUCKET" --region "$REGION" 2>/dev/null; then
-  echo "Creating tfstate bucket: ${TFSTATE_BUCKET}"
-  if [ "$REGION" = "us-east-1" ]; then
-    aws s3api create-bucket --bucket "$TFSTATE_BUCKET" --region "$REGION"
-  else
-    aws s3api create-bucket --bucket "$TFSTATE_BUCKET" --region "$REGION" \
-      --create-bucket-configuration LocationConstraint="$REGION"
-  fi
-  aws s3api put-bucket-versioning --bucket "$TFSTATE_BUCKET" \
-    --versioning-configuration Status=Enabled
-  echo "Bucket ${TFSTATE_BUCKET} created with versioning enabled."
-else
-  echo "Using existing tfstate bucket: ${TFSTATE_BUCKET}"
+if [ -z "${RDS_SQL_SERVER_S3_STATE_BUCKET:-}" ]; then
+  echo "ERROR: RDS_SQL_SERVER_S3_STATE_BUCKET is not set." >&2
+  echo "       Set it on the agent to the name of an existing S3 bucket that holds" >&2
+  echo "       the tofu state for every instance of this service." >&2
+  exit 1
 fi
 
-export TFSTATE_BUCKET
+TFSTATE_BUCKET="$RDS_SQL_SERVER_S3_STATE_BUCKET"
+TFSTATE_KEY_PREFIX="services/${SERVICE_ID}/"
+
+if ! aws s3api head-bucket --bucket "$TFSTATE_BUCKET" --region "$REGION" >/dev/null 2>&1; then
+  echo "ERROR: the state bucket ${TFSTATE_BUCKET} does not exist or is not reachable from ${REGION}." >&2
+  exit 1
+fi
+
+echo "Using state bucket: ${TFSTATE_BUCKET} (prefix ${TFSTATE_KEY_PREFIX})"
+
+export TFSTATE_BUCKET TFSTATE_KEY_PREFIX
 
 OUTPUT_DIR="/tmp/np-service-${SERVICE_ID}"
 export OUTPUT_DIR
@@ -97,7 +97,7 @@ mkdir -p "$OUTPUT_DIR"
 
 export TOFU_MODULE_DIR="$SERVICE_PATH/deployment"
 
-export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=terraform.tfstate -backend-config=region=${REGION}"
+export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}terraform.tfstate -backend-config=region=${REGION}"
 
 TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=instance_name=${INSTANCE_NAME} -var=region=${REGION} -var=vpc_id=${VPC_ID} -var=edition=${EDITION} -var=instance_class=${INSTANCE_CLASS} -var=allocated_storage=${ALLOCATED_STORAGE} -var=sqlserver_version=${SQLSERVER_VERSION} -var=multi_az=${MULTI_AZ}"
 

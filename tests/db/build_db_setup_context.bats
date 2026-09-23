@@ -9,7 +9,8 @@ setup() {
   export SERVICE_PATH="$DB_SERVICE_PATH"
   export VALUES="$DB_SERVICE_PATH/values.yaml"
   export OUTPUT_DIR="$BATS_TEST_TMPDIR/work"
-  export TFSTATE_BUCKET="np-service-svc-1"
+  export TFSTATE_BUCKET="acme-tofu-state"
+  export TFSTATE_KEY_PREFIX="services/svc-1/"
   export CONTEXT='{"service":{"id":"svc-1"},"type":"update","entity_nrn":"organization=1:account=2"}'
 
   export SERVER_HOSTNAME="sql.example.rds.amazonaws.com"
@@ -30,7 +31,8 @@ run_and_dump() {
   run bash -c "source '$DB_SERVICE_PATH/scripts/aws/build_db_setup_context' >/dev/null 2>&1; \
     echo \"DB_HOST=\$DB_HOST\"; echo \"DB_PORT=\$DB_PORT\"; \
     echo \"MASTER_SECRET_ARN=\$MASTER_SECRET_ARN\"; \
-    echo \"TOFU_MODULE_DIR=\$TOFU_MODULE_DIR\"; echo \"TOFU_VARIABLES=\$TOFU_VARIABLES\""
+    echo \"TOFU_MODULE_DIR=\$TOFU_MODULE_DIR\"; echo \"TOFU_VARIABLES=\$TOFU_VARIABLES\"; \
+    echo \"TOFU_INIT_VARIABLES=\$TOFU_INIT_VARIABLES\""
 }
 
 @test "stored service attributes resolve the connection without a lookup" {
@@ -53,6 +55,12 @@ run_and_dump() {
   [[ "$output" == *"TOFU_MODULE_DIR=$DB_SERVICE_PATH/db_setup"* ]]
   [[ "$output" == *"-var=db_name=app_42"* ]]
   [[ "$output" == *"-var=db_username=app_42"* ]]
+}
+
+@test "the backend key is namespaced under this instance's prefix" {
+  run_and_dump
+  [[ "$output" == *"-backend-config=bucket=acme-tofu-state"* ]]
+  [[ "$output" == *"-backend-config=key=services/svc-1/db_setup.tfstate"* ]]
 }
 
 @test "a stored database name that is not a valid identifier aborts" {

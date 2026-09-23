@@ -23,7 +23,7 @@ makes "which engines do we support" a matter of reading names rather than
 inspecting the attributes of existing services.
 
 The price, accepted deliberately: `assume_role`, `assume_role_lib`,
-`assume_role_step`, `do_tofu` and `delete_tfstate_bucket` are duplicated across
+`assume_role_step`, `do_tofu` and `delete_tfstate_objects` are duplicated across
 the engine repositories.
 
 ## How this differs from the PostgreSQL services
@@ -74,6 +74,27 @@ the other engine's credentials.
 
 Discovery can be narrowed further with `server_specification_id` in
 `rds-sqlserver-db/values.yaml`.
+
+## Terraform state
+
+Set `RDS_SQL_SERVER_S3_STATE_BUCKET` on the agent to the name of an existing S3
+bucket. Every instance of both services keeps its state there under
+`services/<service-id>/`, so one bucket covers the whole repository and the
+service id keeps the keys apart.
+
+The variable is **required** — without it every action fails before touching
+AWS, so there is no fallback path to keep working. The bucket must already
+exist; the service never creates one and assumes nothing about its name. Pass
+the same name as `state_bucket_name` to each `specs/requirements/aws` module,
+which grants the role access to that bucket and to nothing else.
+
+Deleting a service empties only its own prefix and never removes the bucket.
+
+An earlier draft of these services created one bucket per instance
+(`np-service-<service-id>`). That is gone: a bucket per instance is unbounded
+sprawl against a hard account limit, needs an `s3:CreateBucket` grant the agent
+should not have, and leaves nowhere to apply a single lifecycle or encryption
+policy.
 
 ## Tests
 

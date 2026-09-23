@@ -91,6 +91,6 @@ mkdir -p "$OUTPUT_DIR"
 
 export TOFU_MODULE_DIR="$SERVICE_PATH/db_setup"
 
-export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=db_setup.tfstate -backend-config=region=${REGION}"
+export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}db_setup.tfstate -backend-config=region=${REGION}"
 
 export TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=region=${REGION} -var=db_host=${DB_HOST} -var=db_port=${DB_PORT} -var=db_name=${DB_NAME} -var=db_username=${DB_USERNAME} -var=master_secret_arn=${MASTER_SECRET_ARN}"
