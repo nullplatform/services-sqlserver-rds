@@ -1,0 +1,96 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib"
+
+REGION=$(yaml_value "region" "us-east-1" "$VALUES")
+SERVER_SPECIFICATION_ID=$(yaml_value "server_specification_id" "" "$VALUES")
+
+SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
+ACTION_TYPE=$(echo "$CONTEXT" | jq -r '.type // ""')
+
+if [ -n "${SERVER_HOSTNAME:-}" ]; then
+  echo "Using stored service attributes for DB setup context..."
+  DB_HOST="$SERVER_HOSTNAME"
+  DB_PORT="${SERVER_PORT:-1433}"
+  MASTER_SECRET_ARN="$SERVER_MASTER_SECRET_ARN"
+  DB_NAME_VAL="${DB_NAME:-}"
+  DB_USERNAME_VAL="${DB_USERNAME:-}"
+
+else
+  if [ "$ACTION_TYPE" = "delete" ]; then
+    echo "Service has no stored hostname — was never created successfully. Skipping DB cleanup."
+    export SETUP_SKIPPED=true
+    exit 0
+  fi
+
+  ENTITY_NRN=$(echo "$CONTEXT" | jq -r '.entity_nrn // ""')
+  SERVICE_DIMENSIONS=$(echo "$CONTEXT" | jq -c '.service.dimensions // {}')
+  echo "Auto-discovering RDS SQL Server instance in ${ENTITY_NRN} (dimensions: ${SERVICE_DIMENSIONS})..."
+
+  SECRET_PREFIX=":secret:nullplatform/rds-sqlserver/"
+
+  SERVER_SERVICES=$(np service list \
+    --nrn "$ENTITY_NRN" \
+    --type dependency \
+    --status active \
+    ${SERVER_SPECIFICATION_ID:+--specification-id "$SERVER_SPECIFICATION_ID"} \
+    --format json | \
+    jq --argjson dims "$SERVICE_DIMENSIONS" --arg prefix "$SECRET_PREFIX" \
+    '[(.results // .) | .[] | . as $svc | select(
+      (.attributes.hostname // "") != "" and
+      ((.attributes.master_secret_arn // "") | contains($prefix)) and
+      ($dims | to_entries | all(. as $kv | ($svc.dimensions[$kv.key] // null) == $kv.value))
+    )]')
+
+  SERVER_COUNT=$(echo "$SERVER_SERVICES" | jq 'length')
+
+  if [ "$SERVER_COUNT" -eq 0 ]; then
+    echo "ERROR: No active RDS SQL Server instance found in ${ENTITY_NRN} matching dimensions: ${SERVICE_DIMENSIONS}" >&2
+    echo "       Create an rds-sqlserver service with matching dimensions first." >&2
+    exit 1
+  elif [ "$SERVER_COUNT" -gt 1 ]; then
+    echo "ERROR: Multiple RDS SQL Server instances found in ${ENTITY_NRN} matching dimensions: ${SERVICE_DIMENSIONS}" >&2
+    echo "       Available options:" >&2
+    echo "$SERVER_SERVICES" | jq -r '.[] | "  - \(.id)  \(.name)  (\(.attributes.hostname))"' >&2
+    echo "       Narrow the search by setting server_specification_id in values.yaml." >&2
+    exit 1
+  fi
+
+  SERVER_SERVICE_ID=$(echo "$SERVER_SERVICES" | jq -r '.[0].id')
+  echo "Auto-discovered server: ${SERVER_SERVICE_ID} ($(echo "$SERVER_SERVICES" | jq -r '.[0].name'))"
+
+  SERVER_JSON=$(np service read --id "$SERVER_SERVICE_ID" --format json)
+  DB_HOST=$(echo "$SERVER_JSON" | jq -r '.attributes.hostname // ""')
+  DB_PORT=$(echo "$SERVER_JSON" | jq -r '.attributes.port // "1433"')
+  MASTER_SECRET_ARN=$(echo "$SERVER_JSON" | jq -r '.attributes.master_secret_arn // ""')
+
+  if [ -z "$DB_HOST" ]; then
+    die "server ${SERVER_SERVICE_ID} has no hostname attribute. Has the rds-sqlserver service been created successfully?"
+  fi
+
+  APPLICATION_ID=$(echo "$CONTEXT" | jq -r '.tags.application_id // ""')
+  if [ -z "$APPLICATION_ID" ]; then
+    die "could not extract application_id from context tags"
+  fi
+
+  DB_NAME_VAL="app_$(printf '%s' "$APPLICATION_ID" | tr -cs 'A-Za-z0-9' '_')"
+  DB_USERNAME_VAL="$DB_NAME_VAL"
+  echo "Database: ${DB_NAME_VAL}, Username: ${DB_USERNAME_VAL}"
+fi
+
+validate_identifier "database name" "$DB_NAME_VAL"
+validate_identifier "database username" "$DB_USERNAME_VAL"
+
+export DB_HOST DB_PORT MASTER_SECRET_ARN
+export DB_NAME="$DB_NAME_VAL"
+export DB_USERNAME="$DB_USERNAME_VAL"
+
+mkdir -p "$OUTPUT_DIR"
+
+export TOFU_MODULE_DIR="$SERVICE_PATH/db_setup"
+
+export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}db_setup.tfstate -backend-config=region=${REGION}"
+
+export TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=region=${REGION} -var=db_host=${DB_HOST} -var=db_port=${DB_PORT} -var=db_name=${DB_NAME} -var=db_username=${DB_USERNAME} -var=master_secret_arn=${MASTER_SECRET_ARN}"

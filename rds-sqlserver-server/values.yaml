@@ -1,0 +1,19 @@
+# RDS SQL Server Server — static configuration, not exposed in the NP UI.
+#
+# NOTE: In scripts, $VALUES is a FILE PATH (set by np service workflow exec
+#       --values). It is NOT JSON content. Read values with yaml_value().
+#
+# Region and VPC are resolved at runtime from the account's nullplatform
+# providers, so they are deliberately absent here.
+
+# Named AWS profile for local testing (e.g. an SSO profile with RDS access).
+# If set and AWS_PROFILE is not already in the environment, build_context
+# exports it so Terraform and the AWS CLI use the right credentials.
+# Run "aws sso login --profile <name>" before starting np-agent locally.
+aws_profile: ""
+
+# Provider categories the platform must resolve into CONTEXT.providers before
+# running workflow steps. identity-access-control is required by
+# scripts/aws/assume_role_step to look up the AssumeRole target ARN.
+provider_categories:
+  - identity-access-control

@@ -1,0 +1,115 @@
+#!/bin/bash
+
+if ! type -t die >/dev/null 2>&1; then
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+fi
+
+if ! type -t yaml_value >/dev/null 2>&1; then
+yaml_value() {
+  local key="$1" default="$2" file="$3"
+  local val
+  val=$(grep "^${key}:" "$file" 2>/dev/null | sed 's/^[^:]*: *//;s/^"//;s/"$//' | head -1)
+  echo "${val:-$default}"
+}
+fi
+
+if ! type -t validate_identifier >/dev/null 2>&1; then
+validate_identifier() {
+  local label="$1" value="$2"
+
+  if [ -z "$value" ]; then
+    die "${label} is empty"
+  fi
+
+  if ! printf '%s' "$value" | grep -Eq '^[A-Za-z][A-Za-z0-9_]{0,63}$'; then
+    die "${label} '${value}' is not a valid SQL Server identifier (letter followed by up to 63 letters, digits or underscores)"
+  fi
+}
+fi
+
+if ! type -t validate_password >/dev/null 2>&1; then
+validate_password() {
+  local value="$1"
+
+  if [ -z "$value" ]; then
+    die "generated password is empty"
+  fi
+
+  if ! printf '%s' "$value" | grep -Eq '^[A-Za-z0-9]{16,128}$'; then
+    die "generated password contains characters that are unsafe to substitute into T-SQL; db_setup must keep random_password.special = false"
+  fi
+}
+fi
+
+if ! type -t fetch_master_credentials >/dev/null 2>&1; then
+fetch_master_credentials() {
+  local secret_arn="$1"
+  local creds
+
+  if [ -z "$secret_arn" ]; then
+    die "master secret ARN is empty — cannot reach the SQL Server instance"
+  fi
+
+  creds=$(aws secretsmanager get-secret-value \
+    --secret-id "$secret_arn" \
+    --query 'SecretString' \
+    --output text) || die "could not read master credentials from ${secret_arn}"
+
+  MASTER_USER=$(echo "$creds" | jq -r '.username')
+  SQLCMDPASSWORD=$(echo "$creds" | jq -r '.password')
+  export MASTER_USER SQLCMDPASSWORD
+
+  if [ -z "$MASTER_USER" ] || [ "$MASTER_USER" = "null" ]; then
+    die "master secret ${secret_arn} has no username field"
+  fi
+}
+fi
+
+if ! type -t require_sqlcmd >/dev/null 2>&1; then
+require_sqlcmd() {
+  command -v sqlcmd >/dev/null 2>&1 \
+    || die "sqlcmd not found in PATH — the service image must bundle go-sqlcmd"
+}
+fi
+
+if [ -z "${SQLCMD_CONNECT_FLAGS:-}" ]; then
+  SQLCMD_CONNECT_FLAGS_DEFAULT="-b --encrypt-connection true --trust-server-certificate"
+  SQLCMD_CONNECT_FLAGS=$(yaml_value "sqlcmd_connect_flags" "$SQLCMD_CONNECT_FLAGS_DEFAULT" "${VALUES:-}")
+  export SQLCMD_CONNECT_FLAGS
+fi
+
+if ! type -t sqlcmd_exec >/dev/null 2>&1; then
+sqlcmd_exec() {
+  local database="$1" sql_file="$2"
+  shift 2
+
+  require_sqlcmd
+
+  if [ ! -f "$sql_file" ]; then
+    die "SQL file not found: ${sql_file}"
+  fi
+
+  # shellcheck disable=SC2086
+  sqlcmd \
+    -S "tcp:${DB_HOST},${DB_PORT}" \
+    -U "${MASTER_USER}" \
+    -d "${database}" \
+    $SQLCMD_CONNECT_FLAGS \
+    -i "$sql_file" \
+    "$@"
+}
+fi
+
+if ! type -t access_level_flags >/dev/null 2>&1; then
+access_level_flags() {
+  case "$1" in
+    read)       echo "1 0 0" ;;
+    write)      echo "0 1 0" ;;
+    read-write) echo "1 1 1" ;;
+    *)          die "unknown access level '$1' (expected read, write or read-write)" ;;
+  esac
+}
+fi

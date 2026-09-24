@@ -1,0 +1,30 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib"
+
+if [ "${LINK_NEVER_CREATED:-}" = "true" ]; then
+  echo "Link was never created successfully — nothing to grant."
+  exit 0
+fi
+
+validate_identifier "database name" "${DB_NAME:-}"
+validate_identifier "database username" "${DB_USERNAME:-}"
+
+ACCESS_LEVEL="${LINK_ACCESS_LEVEL:-read-write}"
+
+ROLE_FLAGS=$(access_level_flags "$ACCESS_LEVEL") || exit 1
+read -r WANT_READ WANT_WRITE WANT_DDL <<< "$ROLE_FLAGS"
+
+fetch_master_credentials "$MASTER_SECRET_ARN"
+
+echo "Applying access level '${ACCESS_LEVEL}' for ${DB_USERNAME} on ${DB_NAME}..."
+
+sqlcmd_exec "$DB_NAME" "$SERVICE_PATH/sql/set_role_members.sql" \
+  -v DbUser="$DB_USERNAME" \
+  -v WantRead="$WANT_READ" \
+  -v WantWrite="$WANT_WRITE" \
+  -v WantDdl="$WANT_DDL"
+
+echo "Access level applied."

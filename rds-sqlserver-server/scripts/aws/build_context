@@ -1,0 +1,113 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib"
+
+SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
+SERVICE_NAME=$(echo "$CONTEXT" | jq -r '.service.name // ""')
+SERVICE_NAME="${SERVICE_NAME:-svc-${SERVICE_ID}}"
+
+INSTANCE_NAME="np-$(echo "$SERVICE_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-*//;s/-*$//' | cut -c1-55)"
+
+SERVICE_ATTRS=$(echo "$CONTEXT" | jq -r '(.service.attributes // {}) * (.parameters // {})')
+
+EDITION=$(echo "$SERVICE_ATTRS"           | jq -r '.edition           // "sqlserver-ex"')
+INSTANCE_CLASS=$(echo "$SERVICE_ATTRS"    | jq -r '.instance_class    // "db.t3.small"')
+ALLOCATED_STORAGE=$(echo "$SERVICE_ATTRS" | jq -r '.allocated_storage // 20')
+SQLSERVER_VERSION=$(echo "$SERVICE_ATTRS" | jq -r '.sqlserver_version // "16.00"')
+MULTI_AZ=$(echo "$SERVICE_ATTRS"          | jq -r '.multi_az          // false')
+COLLATION=$(echo "$SERVICE_ATTRS"         | jq -r '.collation         // ""')
+TIMEZONE=$(echo "$SERVICE_ATTRS"          | jq -r '.timezone          // ""')
+SECRET_KMS_KEY_ID=$(echo "$SERVICE_ATTRS" | jq -r '.secret_kms_key_id // ""')
+
+validate_edition_constraints "$EDITION" "$ALLOCATED_STORAGE" "$MULTI_AZ"
+
+AWS_PROFILE_VAL=$(yaml_value "aws_profile" "" "$VALUES")
+
+if [ -n "${AWS_PROFILE_VAL}" ] && [ -z "${AWS_PROFILE:-}" ]; then
+  export AWS_PROFILE="${AWS_PROFILE_VAL}"
+fi
+
+ACCOUNT_NRN=$(echo "$CONTEXT" | jq -r '.service.nrn // .entity_nrn // ""' | sed 's/:namespace=.*$//')
+
+if [ -z "$ACCOUNT_NRN" ]; then
+  die "could not derive account NRN from .service.nrn in context"
+fi
+
+NP_PROVIDERS=$(np provider list --nrn "$ACCOUNT_NRN" --format json --limit 100)
+
+echo "Resolving region and VPC for account: ${ACCOUNT_NRN}"
+
+ACCOUNT_PROVIDER_ID=$(echo "$NP_PROVIDERS" \
+  | jq -r '[(.results // [])[] | select((.data_source.stored_keys // []) | contains(["account.region"]))] | first | .id // ""')
+
+if [ -z "$ACCOUNT_PROVIDER_ID" ] || [ "$ACCOUNT_PROVIDER_ID" = "null" ]; then
+  die "no account provider with account.region found for ${ACCOUNT_NRN}"
+fi
+
+ACCOUNT_PROVIDER_DATA=$(np provider read --id "$ACCOUNT_PROVIDER_ID" --format json)
+REGION=$(echo "$ACCOUNT_PROVIDER_DATA" | jq -r '.attributes.account.region // ""')
+
+if [ -z "$REGION" ]; then
+  die "account.region not found in provider ${ACCOUNT_PROVIDER_ID}"
+fi
+
+echo "Using region: ${REGION}"
+export REGION
+
+VPC_PROVIDER_ID=$(echo "$NP_PROVIDERS" \
+  | jq -r '[(.results // [])[] | select((.data_source.stored_keys // []) | contains(["vpc.id"]))] | first | .id // ""')
+
+if [ -z "$VPC_PROVIDER_ID" ] || [ "$VPC_PROVIDER_ID" = "null" ]; then
+  die "no VPC provider found for account ${ACCOUNT_NRN}"
+fi
+
+VPC_PROVIDER_DATA=$(np provider read --id "$VPC_PROVIDER_ID" --format json)
+VPC_ID=$(echo "$VPC_PROVIDER_DATA" | jq -r '.attributes.vpc.id // ""')
+
+if [ -z "$VPC_ID" ]; then
+  die "vpc.id not found in provider ${VPC_PROVIDER_ID}"
+fi
+
+echo "Using VPC: ${VPC_ID}"
+
+if [ -z "${RDS_SQL_SERVER_S3_STATE_BUCKET:-}" ]; then
+  echo "ERROR: RDS_SQL_SERVER_S3_STATE_BUCKET is not set." >&2
+  echo "       Set it on the agent to the name of an existing S3 bucket that holds" >&2
+  echo "       the tofu state for every instance of this service." >&2
+  exit 1
+fi
+
+TFSTATE_BUCKET="$RDS_SQL_SERVER_S3_STATE_BUCKET"
+TFSTATE_KEY_PREFIX="services/rds-sqlserver/${SERVICE_ID}/"
+
+if ! aws s3api head-bucket --bucket "$TFSTATE_BUCKET" --region "$REGION" >/dev/null 2>&1; then
+  echo "ERROR: the state bucket ${TFSTATE_BUCKET} does not exist or is not reachable from ${REGION}." >&2
+  exit 1
+fi
+
+echo "Using state bucket: ${TFSTATE_BUCKET} (prefix ${TFSTATE_KEY_PREFIX})"
+
+export TFSTATE_BUCKET TFSTATE_KEY_PREFIX
+
+OUTPUT_DIR="/tmp/np-service-${SERVICE_ID}"
+export OUTPUT_DIR
+mkdir -p "$OUTPUT_DIR"
+
+export TOFU_MODULE_DIR="$SERVICE_PATH/deployment"
+
+export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}terraform.tfstate -backend-config=region=${REGION}"
+
+TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=instance_name=${INSTANCE_NAME} -var=region=${REGION} -var=vpc_id=${VPC_ID} -var=edition=${EDITION} -var=instance_class=${INSTANCE_CLASS} -var=allocated_storage=${ALLOCATED_STORAGE} -var=sqlserver_version=${SQLSERVER_VERSION} -var=multi_az=${MULTI_AZ}"
+
+if [ -n "$SECRET_KMS_KEY_ID" ]; then
+  TOFU_VARIABLES="${TOFU_VARIABLES} -var=secret_kms_key_id=${SECRET_KMS_KEY_ID}"
+fi
+
+jq -n --arg collation "$COLLATION" --arg timezone "$TIMEZONE" \
+  '(if $collation != "" then {collation: $collation} else {} end)
+   + (if $timezone != "" then {timezone: $timezone} else {} end)' \
+  > "$OUTPUT_DIR/sqlserver.auto.tfvars.json"
+
+export TOFU_VARIABLES

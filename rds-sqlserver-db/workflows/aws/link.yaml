@@ -1,0 +1,71 @@
+provider_categories:
+  - identity-access-control
+steps:
+  - name: assume role
+    type: script
+    file: $SERVICE_PATH/scripts/aws/assume_role_step
+    output:
+      - name: AWS_ACCESS_KEY_ID
+        type: environment
+      - name: AWS_SECRET_ACCESS_KEY
+        type: environment
+      - name: AWS_SESSION_TOKEN
+        type: environment
+
+  - name: build context
+    type: script
+    file: $SERVICE_PATH/scripts/aws/build_context
+    output:
+      - name: TFSTATE_BUCKET
+        type: environment
+      - name: TFSTATE_KEY_PREFIX
+        type: environment
+      - name: OUTPUT_DIR
+        type: environment
+      - name: SERVER_HOSTNAME
+        type: environment
+      - name: SERVER_PORT
+        type: environment
+      - name: SERVER_MASTER_SECRET_ARN
+        type: environment
+      - name: DB_NAME
+        type: environment
+      - name: DB_USERNAME
+        type: environment
+      - name: LINK_ID
+        type: environment
+      - name: LINK_NAME
+        type: environment
+      - name: SCOPE_ID
+        type: environment
+      - name: SCOPE_NRN
+        type: environment
+      - name: LINK_ACCESS_LEVEL
+        type: environment
+      - name: LINK_NEVER_CREATED
+        type: environment
+
+  - name: build db setup context
+    type: script
+    file: $SERVICE_PATH/scripts/aws/build_db_setup_context
+    output:
+      - name: DB_HOST
+        type: environment
+      - name: DB_PORT
+        type: environment
+      - name: MASTER_SECRET_ARN
+        type: environment
+      - name: DB_NAME
+        type: environment
+      - name: DB_USERNAME
+        type: environment
+      - name: SETUP_SKIPPED
+        type: environment
+
+  - name: grant access
+    type: script
+    file: $SERVICE_PATH/scripts/aws/grant_access
+
+  - name: write link outputs
+    type: script
+    file: $SERVICE_PATH/scripts/aws/write_link_outputs

@@ -1,0 +1,31 @@
+#!/bin/bash
+
+if ! type -t die >/dev/null 2>&1; then
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+fi
+
+if ! type -t yaml_value >/dev/null 2>&1; then
+yaml_value() {
+  local key="$1" default="$2" file="$3"
+  local val
+  val=$(grep "^${key}:" "$file" 2>/dev/null | sed 's/^[^:]*: *//;s/^"//;s/"$//' | head -1)
+  echo "${val:-$default}"
+}
+fi
+
+if ! type -t validate_edition_constraints >/dev/null 2>&1; then
+validate_edition_constraints() {
+  local edition="$1" storage="$2" multi_az="$3"
+
+  if [ "$edition" = "sqlserver-se" ] && [ "$storage" -lt 200 ]; then
+    die "Standard edition requires at least 200 GB of storage (got ${storage} GB). Raise 'Storage' or choose a different 'Edition'."
+  fi
+
+  if [ "$edition" = "sqlserver-ex" ] && [ "$multi_az" = "true" ]; then
+    die "Express edition does not support High Availability. Disable 'High Availability' or choose a different 'Edition'."
+  fi
+}
+fi

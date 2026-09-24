@@ -1,0 +1,19 @@
+# Permissions role for rds-sqlserver-server. Copy to terraform.tfvars and fill in.
+
+# Cluster this bootstrap run is for. Derives the role name, the policy name
+# prefix, and the default agent role ARN.
+cluster_name = ""
+
+# Existing S3 bucket holding the tofu state of every instance of this service,
+# each under its own services/<service-id>/ prefix. The module grants the role
+# access to this bucket and nothing else. The agent must receive the same name
+# as RDS_SQL_SERVER_S3_STATE_BUCKET.
+state_bucket_name = ""
+
+# Optional overrides.
+# agent_role_arn             = ""
+# additional_agent_role_arns = []
+# role_name                  = ""
+# policies_name_prefix       = ""
+# iam_create_role            = true
+# iam_resource_tags_json     = {}

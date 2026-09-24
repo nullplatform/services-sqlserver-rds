@@ -1,0 +1,68 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib"
+
+SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
+
+REGION=$(yaml_value "region" "us-east-1" "$VALUES")
+AWS_PROFILE_VAL=$(yaml_value "aws_profile" "" "$VALUES")
+
+if [ -n "${AWS_PROFILE_VAL}" ] && [ -z "${AWS_PROFILE:-}" ]; then
+  export AWS_PROFILE="${AWS_PROFILE_VAL}"
+fi
+
+if [ -z "${RDS_SQL_SERVER_S3_STATE_BUCKET:-}" ]; then
+  echo "ERROR: RDS_SQL_SERVER_S3_STATE_BUCKET is not set." >&2
+  echo "       Set it on the agent to the name of an existing S3 bucket that holds" >&2
+  echo "       the tofu state for every instance of this service." >&2
+  exit 1
+fi
+
+TFSTATE_BUCKET="$RDS_SQL_SERVER_S3_STATE_BUCKET"
+TFSTATE_KEY_PREFIX="services/rds-sqlserver/${SERVICE_ID}/"
+
+if ! aws s3api head-bucket --bucket "$TFSTATE_BUCKET" --region "$REGION" >/dev/null 2>&1; then
+  echo "ERROR: the state bucket ${TFSTATE_BUCKET} does not exist or is not reachable from ${REGION}." >&2
+  exit 1
+fi
+
+echo "Using state bucket: ${TFSTATE_BUCKET} (prefix ${TFSTATE_KEY_PREFIX})"
+
+export TFSTATE_BUCKET TFSTATE_KEY_PREFIX
+
+OUTPUT_DIR="/tmp/np-service-${SERVICE_ID}"
+export OUTPUT_DIR
+mkdir -p "$OUTPUT_DIR"
+
+echo "Reading service ${SERVICE_ID} attributes..."
+SERVICE_JSON=$(np service read --id "$SERVICE_ID" --format json)
+
+SERVER_HOSTNAME=$(echo "$SERVICE_JSON"          | jq -r '.attributes.hostname          // ""')
+SERVER_PORT=$(echo "$SERVICE_JSON"              | jq -r '.attributes.port              // "1433"')
+SERVER_MASTER_SECRET_ARN=$(echo "$SERVICE_JSON" | jq -r '.attributes.master_secret_arn // ""')
+DB_NAME=$(echo "$SERVICE_JSON"                  | jq -r '.attributes.database_name     // ""')
+DB_USERNAME=$(echo "$SERVICE_JSON"              | jq -r '.attributes.username          // ""')
+export SERVER_HOSTNAME SERVER_PORT SERVER_MASTER_SECRET_ARN DB_NAME DB_USERNAME
+
+if [ "${ACTION_SOURCE:-}" = "link" ]; then
+  LINK_ID=$(echo "$CONTEXT"   | jq -r '.link.id        // ""')
+  LINK_NAME=$(echo "$CONTEXT" | jq -r '.link.name      // ""')
+  SCOPE_ID=$(echo "$CONTEXT"  | jq -r '.link.scope.id  // ""')
+  SCOPE_NRN=$(echo "$CONTEXT" | jq -r '.link.scope.nrn // ""')
+  export LINK_ID LINK_NAME SCOPE_ID SCOPE_NRN
+
+  LINK_ATTRS=$(echo "$CONTEXT" | jq -r '(.link.attributes // {}) * (.parameters // {})')
+  LINK_ACCESS_LEVEL=$(echo "$LINK_ATTRS" | jq -r '.access_level // "read-write"')
+  export LINK_ACCESS_LEVEL
+
+  ACTION_TYPE=$(echo "$CONTEXT" | jq -r '.type // ""')
+
+  if [ "$ACTION_TYPE" = "delete" ] && [ -z "$SERVER_HOSTNAME" ]; then
+    echo "WARNING: service has no hostname — service was never created successfully. Nothing to revoke."
+    export LINK_NEVER_CREATED=true
+    exit 0
+  fi
+  export LINK_NEVER_CREATED=false
+fi
