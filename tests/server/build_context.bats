@@ -5,15 +5,16 @@ load '../helpers/common'
 BUCKET="acme-tofu-state"
 SERVICE_ID="99999999-8888-7777-6666-555555555555"
 ACCOUNT_NRN="organization=1:account=2"
+SERVICE_NRN="${ACCOUNT_NRN}:namespace=3:service=4"
 REGION="us-east-1"
 VPC_ID="vpc-0123456789abcdef0"
 
 build_context_json() {
   jq -n \
     --arg id "$SERVICE_ID" \
-    --arg nrn "${ACCOUNT_NRN}:namespace=3:service=4" \
+    --arg nrn "$SERVICE_NRN" \
     --argjson attrs "$1" \
-    '{service: {id: $id, nrn: $nrn, attributes: $attrs}, parameters: {}}'
+    '{entity_nrn: $nrn, service: {id: $id, nrn: $nrn, attributes: $attrs}, parameters: {}}'
 }
 
 setup() {
@@ -41,6 +42,18 @@ MOCK
 echo "np \$*" >> "$MOCK_LOG"
 case "\$1 \$2" in
   "provider list")
+    nrn=""
+    ascendants=false
+    prev=""
+    for a in "\$@"; do
+      if [ "\$prev" = "--nrn" ]; then nrn="\$a"; fi
+      if [ "\$a" = "--show-ascendants" ]; then ascendants=true; fi
+      prev="\$a"
+    done
+    if [ "\$nrn" != "$ACCOUNT_NRN" ] && { [ "\$ascendants" != true ] || [[ "\$nrn" != "$ACCOUNT_NRN:"* ]]; }; then
+      echo '{"results":[]}'
+      exit 0
+    fi
     cat <<'JSON'
 {"results":[
   {"id":"prov-region","data_source":{"stored_keys":["account.region"]}},
@@ -118,13 +131,26 @@ run_and_dump() {
   [[ "$output" != *"secret_kms_key_id"* ]]
 }
 
-@test "the account region and vpc are resolved through the np provider list" {
+@test "the region and vpc are resolved from the service nrn including its ascendants" {
   run_and_dump "$(build_context_json '{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}')"
   [ "$status" -eq 0 ]
-  run grep -c -- "--nrn ${ACCOUNT_NRN}" "$MOCK_LOG"
-  [ "$output" -ge 1 ]
+  run grep -c -- "provider list --nrn ${SERVICE_NRN} --show-ascendants" "$MOCK_LOG"
+  [ "$output" = "1" ]
   run grep -c "provider read --id prov-region" "$MOCK_LOG"
   [ "$output" = "1" ]
   run grep -c "provider read --id prov-vpc" "$MOCK_LOG"
   [ "$output" = "1" ]
+}
+
+@test "the entity nrn alone is enough to resolve the providers" {
+  run_and_dump "$(jq -n --arg id "$SERVICE_ID" --arg nrn "$SERVICE_NRN" '{entity_nrn: $nrn, service: {id: $id, attributes: {edition: "sqlserver-ex", allocated_storage: 20, multi_az: false}}, parameters: {}}')"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-var=region=${REGION}"* ]]
+}
+
+@test "a context without any nrn fails before listing providers" {
+  run_and_dump "$(jq -n --arg id "$SERVICE_ID" '{service: {id: $id, attributes: {edition: "sqlserver-ex", allocated_storage: 20, multi_az: false}}, parameters: {}}')"
+  [ "$status" -ne 0 ]
+  run grep -c "provider list" "$MOCK_LOG"
+  [ "$output" = "0" ]
 }

@@ -29,21 +29,21 @@ if [ -n "${AWS_PROFILE_VAL}" ] && [ -z "${AWS_PROFILE:-}" ]; then
   export AWS_PROFILE="${AWS_PROFILE_VAL}"
 fi
 
-ACCOUNT_NRN=$(echo "$CONTEXT" | jq -r '.service.nrn // .entity_nrn // ""' | sed 's/:namespace=.*$//')
+SERVICE_NRN=$(echo "$CONTEXT" | jq -r '.entity_nrn // .service.nrn // ""')
 
-if [ -z "$ACCOUNT_NRN" ]; then
-  die "could not derive account NRN from .service.nrn in context"
+if [ -z "$SERVICE_NRN" ]; then
+  die "could not read the service NRN from .entity_nrn in context"
 fi
 
-NP_PROVIDERS=$(np provider list --nrn "$ACCOUNT_NRN" --format json --limit 100)
+NP_PROVIDERS=$(np provider list --nrn "$SERVICE_NRN" --show-ascendants --format json --limit 100)
 
-echo "Resolving region and VPC for account: ${ACCOUNT_NRN}"
+echo "Resolving region and VPC for service: ${SERVICE_NRN}"
 
 ACCOUNT_PROVIDER_ID=$(echo "$NP_PROVIDERS" \
   | jq -r '[(.results // [])[] | select((.data_source.stored_keys // []) | contains(["account.region"]))] | first | .id // ""')
 
 if [ -z "$ACCOUNT_PROVIDER_ID" ] || [ "$ACCOUNT_PROVIDER_ID" = "null" ]; then
-  die "no account provider with account.region found for ${ACCOUNT_NRN}"
+  die "no account provider with account.region found for ${SERVICE_NRN}"
 fi
 
 ACCOUNT_PROVIDER_DATA=$(np provider read --id "$ACCOUNT_PROVIDER_ID" --format json)
@@ -60,7 +60,7 @@ VPC_PROVIDER_ID=$(echo "$NP_PROVIDERS" \
   | jq -r '[(.results // [])[] | select((.data_source.stored_keys // []) | contains(["vpc.id"]))] | first | .id // ""')
 
 if [ -z "$VPC_PROVIDER_ID" ] || [ "$VPC_PROVIDER_ID" = "null" ]; then
-  die "no VPC provider found for account ${ACCOUNT_NRN}"
+  die "no VPC provider found for ${SERVICE_NRN}"
 fi
 
 VPC_PROVIDER_DATA=$(np provider read --id "$VPC_PROVIDER_ID" --format json)
