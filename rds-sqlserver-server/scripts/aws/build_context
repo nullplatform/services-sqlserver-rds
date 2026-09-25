@@ -48,13 +48,27 @@ fi
 echo "Using region: ${REGION}"
 export REGION
 
-VPC_ID=$(provider_attributes "vpc" "$ENTITY_NRN" "$DIMENSIONS" | jq -r '.vpc.id // ""')
+VPC_ATTRIBUTES=$(provider_attributes "vpc" "$ENTITY_NRN" "$DIMENSIONS")
+VPC_ID=$(echo "$VPC_ATTRIBUTES" | jq -r '.vpc.id // ""')
+SUBNET_IDS=$(echo "$VPC_ATTRIBUTES" | jq -c '.vpc.subnets // []')
 
 if [ -z "$VPC_ID" ]; then
   die "no vpc provider with vpc.id found for ${ENTITY_NRN}${DIMENSIONS:+ (dimensions: ${DIMENSIONS})}"
 fi
 
 echo "Using VPC: ${VPC_ID}"
+
+SUBNET_COUNT=$(echo "$SUBNET_IDS" | jq 'length')
+
+if [ "$SUBNET_COUNT" -eq 0 ]; then
+  die "the vpc provider for ${ENTITY_NRN} has no vpc.subnets; list the private subnets the database should use"
+fi
+
+if [ "$SUBNET_COUNT" -lt 2 ]; then
+  die "the vpc provider for ${ENTITY_NRN} lists ${SUBNET_COUNT} subnet in vpc.subnets; RDS needs at least two, in different availability zones"
+fi
+
+echo "Using subnets: ${SUBNET_IDS}"
 
 if [ -z "${RDS_SQL_SERVER_S3_STATE_BUCKET:-}" ]; then
   echo "ERROR: RDS_SQL_SERVER_S3_STATE_BUCKET is not set." >&2
@@ -78,6 +92,8 @@ export TFSTATE_BUCKET TFSTATE_KEY_PREFIX
 OUTPUT_DIR="/tmp/np-service-${SERVICE_ID}"
 export OUTPUT_DIR
 mkdir -p "$OUTPUT_DIR"
+
+jq -n --argjson subnet_ids "$SUBNET_IDS" '{subnet_ids: $subnet_ids}' > "$OUTPUT_DIR/network.auto.tfvars.json"
 
 export TOFU_MODULE_DIR="$SERVICE_PATH/deployment"
 

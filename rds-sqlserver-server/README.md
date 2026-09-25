@@ -49,6 +49,9 @@ Everything else is expressed in the schema itself.
   edition; leaving it in makes the create fail.
 - **The master username is `npmaster`.** RDS rejects `admin`, `sa`, `public`
   and `guest`, and `master` collides with the system database name.
+- **Subnets come from `vpc.subnets` of the `vpc` provider.** List private
+  subnets in at least two availability zones; RDS rejects a subnet group with
+  fewer, and `build_context` stops before tofu when there are not two.
 - **The security group opens 1433 to every CIDR associated with the VPC**, not
   only the primary one. EKS clusters commonly add a secondary CIDR for pod
   networking, and restricting to the primary silently blocks agent-to-RDS

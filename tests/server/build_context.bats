@@ -9,6 +9,7 @@ SERVICE_NRN="${ACCOUNT_NRN}:namespace=3:service=4"
 REGION="us-east-1"
 VPC_ID="vpc-0123456789abcdef0"
 OTHER_REGION="sa-east-1"
+SUBNETS='["subnet-aaa","subnet-bbb"]'
 DIMENSIONS="environment:javi-k8s"
 
 build_context_json() {
@@ -26,6 +27,7 @@ setup() {
   export VALUES="$SERVER_SERVICE_PATH/values.yaml"
   export RDS_SQL_SERVER_S3_STATE_BUCKET="$BUCKET"
   unset RDS_SQL_SERVER_SECRET_KMS_KEY_ID
+  export MOCK_SUBNETS="$SUBNETS"
 
   cat > "$MOCK_BIN/aws" <<MOCK
 #!/usr/bin/env bash
@@ -63,7 +65,7 @@ fi
 case "\$category:\$dimensions" in
   cloud-providers:$DIMENSIONS) echo '{"results":[{"attributes":{"account":{"region":"$REGION"}}}]}' ;;
   cloud-providers:*)           echo '{"results":[{"attributes":{"account":{"region":"$OTHER_REGION"}}}]}' ;;
-  vpc:*)                       echo '{"results":[{"attributes":{"vpc":{"id":"$VPC_ID"}}}]}' ;;
+  vpc:*)                       echo '{"results":[{"attributes":{"vpc":{"id":"$VPC_ID","subnets":'"\$MOCK_SUBNETS"'}}}]}' ;;
   *)                           echo '{"results":[]}' ;;
 esac
 MOCK
@@ -164,4 +166,29 @@ run_and_dump() {
   [ "$status" -ne 0 ]
   run grep -c "provider list" "$MOCK_LOG"
   [ "$output" = "0" ]
+}
+
+run_and_read_network_tfvars() {
+  export CONTEXT="$1"
+  run bash -c "source '$SERVER_SERVICE_PATH/scripts/aws/build_context' >/dev/null 2>&1 || exit 1; cat \"\$OUTPUT_DIR/network.auto.tfvars.json\""
+}
+
+@test "the vpc provider subnets reach tofu through an auto tfvars file" {
+  run_and_read_network_tfvars "$(build_context_json '{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}')"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.subnet_ids')" = "$SUBNETS" ]
+}
+
+@test "a vpc provider without subnets fails before tofu" {
+  export MOCK_SUBNETS='[]'
+  run bash -c "export CONTEXT='$(build_context_json '{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}')'; source '$SERVER_SERVICE_PATH/scripts/aws/build_context'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"vpc.subnets"* ]]
+}
+
+@test "a single subnet is rejected because rds needs two availability zones" {
+  export MOCK_SUBNETS='["subnet-aaa"]'
+  run bash -c "export CONTEXT='$(build_context_json '{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}')'; source '$SERVER_SERVICE_PATH/scripts/aws/build_context'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"at least two"* ]]
 }
