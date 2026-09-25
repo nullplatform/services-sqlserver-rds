@@ -50,3 +50,24 @@ instance_class_for_workload() {
   esac
 }
 fi
+
+if ! type -t context_dimensions >/dev/null 2>&1; then
+context_dimensions() {
+  echo "$1" | jq -r '
+    if (.service.dimensions | type) == "object" and ((.service.dimensions | length) > 0)
+    then [ .service.dimensions | to_entries[] | "\(.key):\(.value)" ] | join(",")
+    else empty end'
+}
+fi
+
+if ! type -t provider_attributes >/dev/null 2>&1; then
+provider_attributes() {
+  local category="$1" nrn="$2" dimensions="$3"
+  np provider list \
+    --nrn "$nrn" \
+    --categories "$category" \
+    ${dimensions:+--dimensions "$dimensions"} \
+    --format json \
+    | jq -c '(.results // [])[0].attributes // {}'
+}
+fi

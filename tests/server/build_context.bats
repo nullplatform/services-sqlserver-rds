@@ -8,13 +8,15 @@ ACCOUNT_NRN="organization=1:account=2"
 SERVICE_NRN="${ACCOUNT_NRN}:namespace=3:service=4"
 REGION="us-east-1"
 VPC_ID="vpc-0123456789abcdef0"
+OTHER_REGION="sa-east-1"
+DIMENSIONS="environment:javi-k8s"
 
 build_context_json() {
   jq -n \
     --arg id "$SERVICE_ID" \
     --arg nrn "$SERVICE_NRN" \
     --argjson attrs "$1" \
-    '{entity_nrn: $nrn, service: {id: $id, nrn: $nrn, attributes: $attrs}, parameters: {}}'
+    '{entity_nrn: $nrn, service: {id: $id, nrn: $nrn, dimensions: {environment: "javi-k8s"}, attributes: $attrs}, parameters: {}}'
 }
 
 setup() {
@@ -40,40 +42,29 @@ MOCK
   cat > "$MOCK_BIN/np" <<MOCK
 #!/usr/bin/env bash
 echo "np \$*" >> "$MOCK_LOG"
-case "\$1 \$2" in
-  "provider list")
-    nrn=""
-    ascendants=false
-    prev=""
-    for a in "\$@"; do
-      if [ "\$prev" = "--nrn" ]; then nrn="\$a"; fi
-      if [ "\$a" = "--show-ascendants" ]; then ascendants=true; fi
-      prev="\$a"
-    done
-    if [ "\$nrn" != "$ACCOUNT_NRN" ] && { [ "\$ascendants" != true ] || [[ "\$nrn" != "$ACCOUNT_NRN:"* ]]; }; then
-      echo '{"results":[]}'
-      exit 0
-    fi
-    cat <<'JSON'
-{"results":[
-  {"id":"prov-region","data_source":{"stored_keys":["account.region"]}},
-  {"id":"prov-vpc","data_source":{"stored_keys":["vpc.id"]}}
-]}
-JSON
-    ;;
-  "provider read")
-    id=""
-    prev=""
-    for a in "\$@"; do
-      if [ "\$prev" = "--id" ]; then id="\$a"; fi
-      prev="\$a"
-    done
-    case "\$id" in
-      prov-region) echo '{"attributes":{"account":{"region":"$REGION"}}}' ;;
-      prov-vpc)    echo '{"attributes":{"vpc":{"id":"$VPC_ID"}}}' ;;
-      *) echo '{"attributes":{}}' ;;
-    esac
-    ;;
+[ "\$1 \$2" = "provider list" ] || { echo "unexpected np call: \$*" >&2; exit 1; }
+nrn=""
+category=""
+dimensions=""
+prev=""
+for a in "\$@"; do
+  case "\$prev" in
+    --nrn) nrn="\$a" ;;
+    --categories) category="\$a" ;;
+    --dimensions) dimensions="\$a" ;;
+    --limit) [ -n "\$category" ] && { echo '{"error":"error: cannot use flag limit when using categories flag"}'; exit 1; } ;;
+  esac
+  prev="\$a"
+done
+if [[ "\$nrn" != "$ACCOUNT_NRN"* ]]; then
+  echo '{"results":[]}'
+  exit 0
+fi
+case "\$category:\$dimensions" in
+  cloud-providers:$DIMENSIONS) echo '{"results":[{"attributes":{"account":{"region":"$REGION"}}}]}' ;;
+  cloud-providers:*)           echo '{"results":[{"attributes":{"account":{"region":"$OTHER_REGION"}}}]}' ;;
+  vpc:*)                       echo '{"results":[{"attributes":{"vpc":{"id":"$VPC_ID"}}}]}' ;;
+  *)                           echo '{"results":[]}' ;;
 esac
 MOCK
   chmod +x "$MOCK_BIN/np"
@@ -131,19 +122,39 @@ run_and_dump() {
   [[ "$output" != *"secret_kms_key_id"* ]]
 }
 
-@test "the region and vpc are resolved from the service nrn including its ascendants" {
+@test "the region and vpc are resolved from the entity nrn and the service dimensions" {
   run_and_dump "$(build_context_json '{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}')"
   [ "$status" -eq 0 ]
-  run grep -c -- "provider list --nrn ${SERVICE_NRN} --show-ascendants" "$MOCK_LOG"
+  [[ "$output" == *"-var=region=${REGION} "* ]]
+  [[ "$output" == *"-var=vpc_id=${VPC_ID} "* ]]
+  run grep -c -- "provider list --nrn ${SERVICE_NRN} --categories cloud-providers --dimensions ${DIMENSIONS}" "$MOCK_LOG"
   [ "$output" = "1" ]
-  run grep -c "provider read --id prov-region" "$MOCK_LOG"
-  [ "$output" = "1" ]
-  run grep -c "provider read --id prov-vpc" "$MOCK_LOG"
+  run grep -c -- "provider list --nrn ${SERVICE_NRN} --categories vpc --dimensions ${DIMENSIONS}" "$MOCK_LOG"
   [ "$output" = "1" ]
 }
 
-@test "the entity nrn alone is enough to resolve the providers" {
+@test "a service without dimensions omits the dimensions flag" {
   run_and_dump "$(jq -n --arg id "$SERVICE_ID" --arg nrn "$SERVICE_NRN" '{entity_nrn: $nrn, service: {id: $id, attributes: {edition: "sqlserver-ex", allocated_storage: 20, multi_az: false}}, parameters: {}}')"
+  [ "$status" -eq 0 ]
+  run grep -c -- "--dimensions" "$MOCK_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "the entity nrn wins over the service nrn" {
+  run_and_dump "$(jq -n --arg id "$SERVICE_ID" --arg nrn "$SERVICE_NRN" '{entity_nrn: $nrn, service: {id: $id, nrn: "organization=9:account=9", attributes: {edition: "sqlserver-ex", allocated_storage: 20, multi_az: false}}, parameters: {}}')"
+  [ "$status" -eq 0 ]
+  run grep -c -- "--nrn organization=9:account=9" "$MOCK_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "a missing region provider fails naming the nrn" {
+  run bash -c "export CONTEXT='$(jq -nc --arg id "$SERVICE_ID" '{entity_nrn: "organization=7:account=7", service: {id: $id, attributes: {edition: "sqlserver-ex", allocated_storage: 20, multi_az: false}}, parameters: {}}')'; source '$SERVER_SERVICE_PATH/scripts/aws/build_context'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"organization=7:account=7"* ]]
+}
+
+@test "the entity nrn alone is enough to resolve the providers" {
+  run_and_dump "$(jq -n --arg id "$SERVICE_ID" --arg nrn "$SERVICE_NRN" '{entity_nrn: $nrn, service: {id: $id, dimensions: {environment: "javi-k8s"}, attributes: {edition: "sqlserver-ex", allocated_storage: 20, multi_az: false}}, parameters: {}}')"
   [ "$status" -eq 0 ]
   [[ "$output" == *"-var=region=${REGION}"* ]]
 }

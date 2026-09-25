@@ -29,45 +29,29 @@ if [ -n "${AWS_PROFILE_VAL}" ] && [ -z "${AWS_PROFILE:-}" ]; then
   export AWS_PROFILE="${AWS_PROFILE_VAL}"
 fi
 
-SERVICE_NRN=$(echo "$CONTEXT" | jq -r '.entity_nrn // .service.nrn // ""')
+ENTITY_NRN=$(echo "$CONTEXT" | jq -r '.entity_nrn // .service.nrn // ""')
 
-if [ -z "$SERVICE_NRN" ]; then
+if [ -z "$ENTITY_NRN" ]; then
   die "could not read the service NRN from .entity_nrn in context"
 fi
 
-NP_PROVIDERS=$(np provider list --nrn "$SERVICE_NRN" --show-ascendants --format json --limit 100)
+DIMENSIONS=$(context_dimensions "$CONTEXT")
 
-echo "Resolving region and VPC for service: ${SERVICE_NRN}"
+echo "Resolving region and VPC for ${ENTITY_NRN}${DIMENSIONS:+ (dimensions: ${DIMENSIONS})}"
 
-ACCOUNT_PROVIDER_ID=$(echo "$NP_PROVIDERS" \
-  | jq -r '[(.results // [])[] | select((.data_source.stored_keys // []) | contains(["account.region"]))] | first | .id // ""')
-
-if [ -z "$ACCOUNT_PROVIDER_ID" ] || [ "$ACCOUNT_PROVIDER_ID" = "null" ]; then
-  die "no account provider with account.region found for ${SERVICE_NRN}"
-fi
-
-ACCOUNT_PROVIDER_DATA=$(np provider read --id "$ACCOUNT_PROVIDER_ID" --format json)
-REGION=$(echo "$ACCOUNT_PROVIDER_DATA" | jq -r '.attributes.account.region // ""')
+REGION=$(provider_attributes "cloud-providers" "$ENTITY_NRN" "$DIMENSIONS" | jq -r '.account.region // ""')
 
 if [ -z "$REGION" ]; then
-  die "account.region not found in provider ${ACCOUNT_PROVIDER_ID}"
+  die "no cloud-providers provider with account.region found for ${ENTITY_NRN}${DIMENSIONS:+ (dimensions: ${DIMENSIONS})}"
 fi
 
 echo "Using region: ${REGION}"
 export REGION
 
-VPC_PROVIDER_ID=$(echo "$NP_PROVIDERS" \
-  | jq -r '[(.results // [])[] | select((.data_source.stored_keys // []) | contains(["vpc.id"]))] | first | .id // ""')
-
-if [ -z "$VPC_PROVIDER_ID" ] || [ "$VPC_PROVIDER_ID" = "null" ]; then
-  die "no VPC provider found for ${SERVICE_NRN}"
-fi
-
-VPC_PROVIDER_DATA=$(np provider read --id "$VPC_PROVIDER_ID" --format json)
-VPC_ID=$(echo "$VPC_PROVIDER_DATA" | jq -r '.attributes.vpc.id // ""')
+VPC_ID=$(provider_attributes "vpc" "$ENTITY_NRN" "$DIMENSIONS" | jq -r '.vpc.id // ""')
 
 if [ -z "$VPC_ID" ]; then
-  die "vpc.id not found in provider ${VPC_PROVIDER_ID}"
+  die "no vpc provider with vpc.id found for ${ENTITY_NRN}${DIMENSIONS:+ (dimensions: ${DIMENSIONS})}"
 fi
 
 echo "Using VPC: ${VPC_ID}"
