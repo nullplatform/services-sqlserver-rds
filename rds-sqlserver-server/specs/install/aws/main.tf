@@ -32,7 +32,7 @@
 
 locals {
   service_path      = "rds-sqlserver-server"
-  available_links   = ["connect"]
+  available_links   = []
   available_actions = []
 
   account_nrn = replace(var.nrn, "/:namespace=[^:]*/", "")
