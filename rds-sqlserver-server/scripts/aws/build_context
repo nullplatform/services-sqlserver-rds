@@ -13,15 +13,15 @@ INSTANCE_NAME="np-$(echo "$SERVICE_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs '
 SERVICE_ATTRS=$(echo "$CONTEXT" | jq -r '(.service.attributes // {}) * (.parameters // {})')
 
 EDITION=$(echo "$SERVICE_ATTRS"           | jq -r '.edition           // "sqlserver-ex"')
-INSTANCE_CLASS=$(echo "$SERVICE_ATTRS"    | jq -r '.instance_class    // "db.t3.small"')
+WORKLOAD=$(echo "$SERVICE_ATTRS"          | jq -r '.workload          // "development"')
 ALLOCATED_STORAGE=$(echo "$SERVICE_ATTRS" | jq -r '.allocated_storage // 20')
 SQLSERVER_VERSION=$(echo "$SERVICE_ATTRS" | jq -r '.sqlserver_version // "16.00"')
 MULTI_AZ=$(echo "$SERVICE_ATTRS"          | jq -r '.multi_az          // false')
-COLLATION=$(echo "$SERVICE_ATTRS"         | jq -r '.collation         // ""')
-TIMEZONE=$(echo "$SERVICE_ATTRS"          | jq -r '.timezone          // ""')
-SECRET_KMS_KEY_ID=$(echo "$SERVICE_ATTRS" | jq -r '.secret_kms_key_id // ""')
+SECRET_KMS_KEY_ID="${RDS_SQL_SERVER_SECRET_KMS_KEY_ID:-}"
 
 validate_edition_constraints "$EDITION" "$ALLOCATED_STORAGE" "$MULTI_AZ"
+
+INSTANCE_CLASS=$(instance_class_for_workload "$EDITION" "$WORKLOAD")
 
 AWS_PROFILE_VAL=$(yaml_value "aws_profile" "" "$VALUES")
 
@@ -104,10 +104,5 @@ TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=instance_name=${INSTANCE_NAME
 if [ -n "$SECRET_KMS_KEY_ID" ]; then
   TOFU_VARIABLES="${TOFU_VARIABLES} -var=secret_kms_key_id=${SECRET_KMS_KEY_ID}"
 fi
-
-jq -n --arg collation "$COLLATION" --arg timezone "$TIMEZONE" \
-  '(if $collation != "" then {collation: $collation} else {} end)
-   + (if $timezone != "" then {timezone: $timezone} else {} end)' \
-  > "$OUTPUT_DIR/sqlserver.auto.tfvars.json"
 
 export TOFU_VARIABLES

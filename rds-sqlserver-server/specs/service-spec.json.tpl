@@ -16,7 +16,7 @@
     "schema": {
       "type": "object",
       "$schema": "http://json-schema.org/draft-07/schema#",
-      "required": ["edition", "instance_class"],
+      "required": ["edition", "workload"],
       "properties": {
         "edition": {
           "type": "string",
@@ -31,18 +31,16 @@
           "editableOn": ["create"],
           "order": 1
         },
-        "instance_class": {
+        "workload": {
           "type": "string",
-          "title": "Instance Class",
-          "default": "db.t3.small",
+          "title": "Workload",
+          "default": "development",
           "oneOf": [
-            { "const": "db.t3.small", "title": "db.t3.small (2 vCPU, 2 GB)" },
-            { "const": "db.t3.medium", "title": "db.t3.medium (2 vCPU, 4 GB)" },
-            { "const": "db.t3.large", "title": "db.t3.large (2 vCPU, 8 GB)" },
-            { "const": "db.m5.large", "title": "db.m5.large (2 vCPU, 8 GB)" },
-            { "const": "db.m5.xlarge", "title": "db.m5.xlarge (4 vCPU, 16 GB)" }
+            { "const": "development", "title": "Development / testing" },
+            { "const": "production-light", "title": "Production — light traffic" },
+            { "const": "production-heavy", "title": "Production — heavy traffic" }
           ],
-          "description": "RDS instance type. SQL Server does not offer db.t3.micro.",
+          "description": "Expected usage of the database. Capacity is sized for it automatically.",
           "editableOn": ["create", "update"],
           "order": 2
         },
@@ -83,27 +81,6 @@
           "editableOn": ["create", "update"],
           "order": 5
         },
-        "collation": {
-          "type": "string",
-          "title": "Server Collation",
-          "description": "Server-level collation, e.g. SQL_Latin1_General_CP1_CI_AS. Leave empty for the AWS default. Cannot be changed after creation.",
-          "editableOn": ["create"],
-          "order": 6
-        },
-        "timezone": {
-          "type": "string",
-          "title": "Server Timezone",
-          "description": "Server-level timezone, e.g. Argentina Standard Time. Leave empty for UTC. Cannot be changed after creation.",
-          "editableOn": ["create"],
-          "order": 7
-        },
-        "secret_kms_key_id": {
-          "type": "string",
-          "title": "Secret Encryption Key",
-          "description": "KMS key ID or ARN used to encrypt the master password secret in Secrets Manager. Leave empty to use the AWS-managed aws/secretsmanager key.",
-          "editableOn": ["create", "update"],
-          "order": 8
-        },
         "hostname": {
           "type": "string",
           "title": "Hostname",
@@ -111,7 +88,7 @@
           "visibleOn": ["read"],
           "editableOn": [],
           "description": "RDS endpoint hostname (auto-populated after creation)",
-          "order": 9
+          "order": 6
         },
         "port": {
           "type": "number",
@@ -120,7 +97,7 @@
           "visibleOn": ["read"],
           "editableOn": [],
           "description": "RDS port (auto-populated after creation)",
-          "order": 10
+          "order": 7
         },
         "db_instance_identifier": {
           "type": "string",

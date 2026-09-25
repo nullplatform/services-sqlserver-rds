@@ -29,3 +29,24 @@ validate_edition_constraints() {
   fi
 }
 fi
+
+if ! type -t instance_class_for_workload >/dev/null 2>&1; then
+instance_class_for_workload() {
+  local edition="$1" workload="$2"
+  local -a classes
+
+  case "$edition" in
+    sqlserver-ex)  classes=(db.t3.small db.t3.medium db.t3.xlarge) ;;
+    sqlserver-web) classes=(db.t3.medium db.m5.large db.m5.xlarge) ;;
+    sqlserver-se)  classes=(db.m5.large db.m5.xlarge db.m5.2xlarge) ;;
+    *) die "Unknown 'Edition' '${edition}'." ;;
+  esac
+
+  case "$workload" in
+    development)      echo "${classes[0]}" ;;
+    production-light) echo "${classes[1]}" ;;
+    production-heavy) echo "${classes[2]}" ;;
+    *) die "Unknown 'Workload' '${workload}'. Choose development, production-light or production-heavy." ;;
+  esac
+}
+fi

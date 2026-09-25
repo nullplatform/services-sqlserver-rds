@@ -44,3 +44,33 @@ setup() {
   [[ "$output" == *"'Storage'"* ]]
   [[ "$output" == *"'Edition'"* ]]
 }
+
+@test "each edition maps every workload to its instance class" {
+  while read -r edition workload expected; do
+    run instance_class_for_workload "$edition" "$workload"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$expected" ]
+  done <<'TABLE'
+sqlserver-ex development db.t3.small
+sqlserver-ex production-light db.t3.medium
+sqlserver-ex production-heavy db.t3.xlarge
+sqlserver-web development db.t3.medium
+sqlserver-web production-light db.m5.large
+sqlserver-web production-heavy db.m5.xlarge
+sqlserver-se development db.m5.large
+sqlserver-se production-light db.m5.xlarge
+sqlserver-se production-heavy db.m5.2xlarge
+TABLE
+}
+
+@test "an unknown workload is rejected naming the field" {
+  run instance_class_for_workload "sqlserver-ex" "huge"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"'Workload'"* ]]
+}
+
+@test "an unknown edition is rejected" {
+  run instance_class_for_workload "sqlserver-ee" "development"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sqlserver-ee"* ]]
+}

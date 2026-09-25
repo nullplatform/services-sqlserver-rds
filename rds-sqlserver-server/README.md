@@ -9,16 +9,28 @@ exposes no link: applications never connect to this service directly.
 | Field | Notes |
 |---|---|
 | Edition | `sqlserver-ex` (default), `sqlserver-web`, `sqlserver-se`. Fixed at create. |
-| Instance Class | `db.t3.small` upward. SQL Server has no `db.t3.micro`. |
+| Workload | Development / testing, Production — light traffic, Production — heavy traffic. |
 | Storage | 20 GB to 2 TB. Standard edition requires 200 GB or more. |
 | SQL Server Version | 2019 or 2022. Fixed at create. |
 | High Availability | Multi-AZ standby. Not available on Express. |
-| Server Collation / Timezone | Optional, fixed at create. |
-| Secret Encryption Key | Optional KMS key for the master secret. |
 
 Licensing is always `license-included` and is not exposed: bring-your-own-license
 no longer exists for SQL Server on RDS, and offering it invites an expensive
 mistake.
+
+## Workload to instance class
+
+The developer states the expected usage; `instance_class_for_workload` in
+`scripts/aws/lib` picks the RDS instance class for it, per edition:
+
+| Workload | Express | Web | Standard |
+|---|---|---|---|
+| Development / testing | `db.t3.small` | `db.t3.medium` | `db.m5.large` |
+| Production — light traffic | `db.t3.medium` | `db.m5.large` | `db.m5.xlarge` |
+| Production — heavy traffic | `db.t3.xlarge` | `db.m5.xlarge` | `db.m5.2xlarge` |
+
+Collation and timezone are not exposed: the instance uses the AWS default
+collation and UTC.
 
 ## Constraints validated before Terraform runs
 
@@ -48,6 +60,12 @@ State lives in the bucket named by `RDS_SQL_SERVER_S3_STATE_BUCKET`, under
 `services/rds-sqlserver/<service-id>/`. The variable is required and the bucket must already
 exist. See the repository README for the full picture, and pass the same name
 as `state_bucket_name` to `specs/requirements/aws`.
+
+## Master secret encryption
+
+The master password secret is encrypted with the KMS key named by the optional
+`RDS_SQL_SERVER_SECRET_KMS_KEY_ID` agent variable (key ID or ARN). When it is
+unset, Secrets Manager uses the AWS-managed `aws/secretsmanager` key.
 
 ## Outputs
 

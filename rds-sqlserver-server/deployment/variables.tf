@@ -48,18 +48,6 @@ variable "sqlserver_version" {
   description = "SQL Server major version"
 }
 
-variable "timezone" {
-  type        = string
-  default     = null
-  description = "Server-level timezone. Cannot be changed after creation."
-}
-
-variable "collation" {
-  type        = string
-  default     = null
-  description = "Server-level collation. Cannot be changed after creation."
-}
-
 variable "multi_az" {
   type        = bool
   default     = false
