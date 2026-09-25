@@ -19,6 +19,16 @@ variable "vpc_id" {
   description = "VPC ID where the RDS instance will be deployed"
 }
 
+variable "subnet_ids" {
+  type        = list(string)
+  description = "Subnets for the DB subnet group, from vpc.subnets of the vpc provider"
+
+  validation {
+    condition     = length(var.subnet_ids) >= 2
+    error_message = "subnet_ids needs at least two subnets in different availability zones"
+  }
+}
+
 variable "edition" {
   type        = string
   default     = "sqlserver-ex"
@@ -46,18 +56,6 @@ variable "sqlserver_version" {
   type        = string
   default     = "16.00"
   description = "SQL Server major version"
-}
-
-variable "timezone" {
-  type        = string
-  default     = null
-  description = "Server-level timezone. Cannot be changed after creation."
-}
-
-variable "collation" {
-  type        = string
-  default     = null
-  description = "Server-level collation. Cannot be changed after creation."
 }
 
 variable "multi_az" {

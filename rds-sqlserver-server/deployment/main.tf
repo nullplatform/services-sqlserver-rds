@@ -65,7 +65,7 @@ resource "aws_kms_alias" "rds" {
 
 resource "aws_db_subnet_group" "main" {
   name       = var.instance_name
-  subnet_ids = data.aws_subnets.private.ids
+  subnet_ids = var.subnet_ids
 
   tags = {
     "managed-by" = "nullplatform"
@@ -86,9 +86,6 @@ resource "aws_db_instance" "main" {
 
   username = local.master_username
   password = random_password.master.result
-
-  character_set_name = var.collation
-  timezone           = var.timezone
 
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]

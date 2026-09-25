@@ -13,15 +13,15 @@ INSTANCE_NAME="np-$(echo "$SERVICE_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs '
 SERVICE_ATTRS=$(echo "$CONTEXT" | jq -r '(.service.attributes // {}) * (.parameters // {})')
 
 EDITION=$(echo "$SERVICE_ATTRS"           | jq -r '.edition           // "sqlserver-ex"')
-INSTANCE_CLASS=$(echo "$SERVICE_ATTRS"    | jq -r '.instance_class    // "db.t3.small"')
+WORKLOAD=$(echo "$SERVICE_ATTRS"          | jq -r '.workload          // "development"')
 ALLOCATED_STORAGE=$(echo "$SERVICE_ATTRS" | jq -r '.allocated_storage // 20')
 SQLSERVER_VERSION=$(echo "$SERVICE_ATTRS" | jq -r '.sqlserver_version // "16.00"')
 MULTI_AZ=$(echo "$SERVICE_ATTRS"          | jq -r '.multi_az          // false')
-COLLATION=$(echo "$SERVICE_ATTRS"         | jq -r '.collation         // ""')
-TIMEZONE=$(echo "$SERVICE_ATTRS"          | jq -r '.timezone          // ""')
-SECRET_KMS_KEY_ID=$(echo "$SERVICE_ATTRS" | jq -r '.secret_kms_key_id // ""')
+SECRET_KMS_KEY_ID="${RDS_SQL_SERVER_SECRET_KMS_KEY_ID:-}"
 
 validate_edition_constraints "$EDITION" "$ALLOCATED_STORAGE" "$MULTI_AZ"
+
+INSTANCE_CLASS=$(instance_class_for_workload "$EDITION" "$WORKLOAD")
 
 AWS_PROFILE_VAL=$(yaml_value "aws_profile" "" "$VALUES")
 
@@ -29,48 +29,46 @@ if [ -n "${AWS_PROFILE_VAL}" ] && [ -z "${AWS_PROFILE:-}" ]; then
   export AWS_PROFILE="${AWS_PROFILE_VAL}"
 fi
 
-ACCOUNT_NRN=$(echo "$CONTEXT" | jq -r '.service.nrn // .entity_nrn // ""' | sed 's/:namespace=.*$//')
+ENTITY_NRN=$(echo "$CONTEXT" | jq -r '.entity_nrn // .service.nrn // ""')
 
-if [ -z "$ACCOUNT_NRN" ]; then
-  die "could not derive account NRN from .service.nrn in context"
+if [ -z "$ENTITY_NRN" ]; then
+  die "could not read the service NRN from .entity_nrn in context"
 fi
 
-NP_PROVIDERS=$(np provider list --nrn "$ACCOUNT_NRN" --format json --limit 100)
+DIMENSIONS=$(context_dimensions "$CONTEXT")
 
-echo "Resolving region and VPC for account: ${ACCOUNT_NRN}"
+echo "Resolving region and VPC for ${ENTITY_NRN}${DIMENSIONS:+ (dimensions: ${DIMENSIONS})}"
 
-ACCOUNT_PROVIDER_ID=$(echo "$NP_PROVIDERS" \
-  | jq -r '[(.results // [])[] | select((.data_source.stored_keys // []) | contains(["account.region"]))] | first | .id // ""')
-
-if [ -z "$ACCOUNT_PROVIDER_ID" ] || [ "$ACCOUNT_PROVIDER_ID" = "null" ]; then
-  die "no account provider with account.region found for ${ACCOUNT_NRN}"
-fi
-
-ACCOUNT_PROVIDER_DATA=$(np provider read --id "$ACCOUNT_PROVIDER_ID" --format json)
-REGION=$(echo "$ACCOUNT_PROVIDER_DATA" | jq -r '.attributes.account.region // ""')
+REGION=$(provider_attributes "cloud-providers" "$ENTITY_NRN" "$DIMENSIONS" | jq -r '.account.region // ""')
 
 if [ -z "$REGION" ]; then
-  die "account.region not found in provider ${ACCOUNT_PROVIDER_ID}"
+  die "no cloud-providers provider with account.region found for ${ENTITY_NRN}${DIMENSIONS:+ (dimensions: ${DIMENSIONS})}"
 fi
 
 echo "Using region: ${REGION}"
 export REGION
 
-VPC_PROVIDER_ID=$(echo "$NP_PROVIDERS" \
-  | jq -r '[(.results // [])[] | select((.data_source.stored_keys // []) | contains(["vpc.id"]))] | first | .id // ""')
-
-if [ -z "$VPC_PROVIDER_ID" ] || [ "$VPC_PROVIDER_ID" = "null" ]; then
-  die "no VPC provider found for account ${ACCOUNT_NRN}"
-fi
-
-VPC_PROVIDER_DATA=$(np provider read --id "$VPC_PROVIDER_ID" --format json)
-VPC_ID=$(echo "$VPC_PROVIDER_DATA" | jq -r '.attributes.vpc.id // ""')
+VPC_ATTRIBUTES=$(provider_attributes "vpc" "$ENTITY_NRN" "$DIMENSIONS")
+VPC_ID=$(echo "$VPC_ATTRIBUTES" | jq -r '.vpc.id // ""')
+SUBNET_IDS=$(echo "$VPC_ATTRIBUTES" | jq -c '.vpc.subnets // []')
 
 if [ -z "$VPC_ID" ]; then
-  die "vpc.id not found in provider ${VPC_PROVIDER_ID}"
+  die "no vpc provider with vpc.id found for ${ENTITY_NRN}${DIMENSIONS:+ (dimensions: ${DIMENSIONS})}"
 fi
 
 echo "Using VPC: ${VPC_ID}"
+
+SUBNET_COUNT=$(echo "$SUBNET_IDS" | jq 'length')
+
+if [ "$SUBNET_COUNT" -eq 0 ]; then
+  die "the vpc provider for ${ENTITY_NRN} has no vpc.subnets; list the private subnets the database should use"
+fi
+
+if [ "$SUBNET_COUNT" -lt 2 ]; then
+  die "the vpc provider for ${ENTITY_NRN} lists ${SUBNET_COUNT} subnet in vpc.subnets; RDS needs at least two, in different availability zones"
+fi
+
+echo "Using subnets: ${SUBNET_IDS}"
 
 if [ -z "${RDS_SQL_SERVER_S3_STATE_BUCKET:-}" ]; then
   echo "ERROR: RDS_SQL_SERVER_S3_STATE_BUCKET is not set." >&2
@@ -95,6 +93,8 @@ OUTPUT_DIR="/tmp/np-service-${SERVICE_ID}"
 export OUTPUT_DIR
 mkdir -p "$OUTPUT_DIR"
 
+jq -n --argjson subnet_ids "$SUBNET_IDS" '{subnet_ids: $subnet_ids}' > "$OUTPUT_DIR/network.auto.tfvars.json"
+
 export TOFU_MODULE_DIR="$SERVICE_PATH/deployment"
 
 export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}terraform.tfstate -backend-config=region=${REGION}"
@@ -104,10 +104,5 @@ TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=instance_name=${INSTANCE_NAME
 if [ -n "$SECRET_KMS_KEY_ID" ]; then
   TOFU_VARIABLES="${TOFU_VARIABLES} -var=secret_kms_key_id=${SECRET_KMS_KEY_ID}"
 fi
-
-jq -n --arg collation "$COLLATION" --arg timezone "$TIMEZONE" \
-  '(if $collation != "" then {collation: $collation} else {} end)
-   + (if $timezone != "" then {timezone: $timezone} else {} end)' \
-  > "$OUTPUT_DIR/sqlserver.auto.tfvars.json"
 
 export TOFU_VARIABLES
