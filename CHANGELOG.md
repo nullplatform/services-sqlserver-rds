@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/nullplatform/services-sqlserver-rds/compare/v1.0.0...v1.0.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* drop the connect link from rds-sqlserver-server install ([cbc490e](https://github.com/nullplatform/services-sqlserver-rds/commit/cbc490ed912729f630b0df2d7d22cf5caff3f7e5))
+* drop the connect link from rds-sqlserver-server install ([e6bf79d](https://github.com/nullplatform/services-sqlserver-rds/commit/e6bf79dba7e764b24234360ffed59418953f124b))
+
 ## [1.0.0](https://github.com/nullplatform/services-sqlserver-rds/compare/0.0.1...v1.0.0) (2026-09-24)
 
 
