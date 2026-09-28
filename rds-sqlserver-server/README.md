@@ -45,6 +45,9 @@ Everything else is expressed in the schema itself.
 
 ## Notes on the RDS resource
 
+- **Resources are named `<service slug>-<service id>`**, e.g.
+  `orders-cacb7da7-9e34-4ba3-be7a-c2a149c23ead`. The slug is truncated so the
+  RDS identifier stays within 63 characters.
 - **`db_name` is deliberately absent.** RDS rejects it for every SQL Server
   edition; leaving it in makes the create fail.
 - **The master username is `npmaster`.** RDS rejects `admin`, `sa`, `public`

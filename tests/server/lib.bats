@@ -74,3 +74,32 @@ TABLE
   [ "$status" -ne 0 ]
   [[ "$output" == *"sqlserver-ee"* ]]
 }
+
+@test "the instance name is the service slug followed by the service id" {
+  run instance_name_for "test-fede" "cacb7da7-9e34-4ba3-be7a-c2a149c23ead"
+  [ "$status" -eq 0 ]
+  [ "$output" = "test-fede-cacb7da7-9e34-4ba3-be7a-c2a149c23ead" ]
+}
+
+@test "the instance name is lowercased and keeps only letters digits and single hyphens" {
+  run instance_name_for "My__Orders.DB" "cacb7da7-9e34-4ba3-be7a-c2a149c23ead"
+  [ "$output" = "my-orders-db-cacb7da7-9e34-4ba3-be7a-c2a149c23ead" ]
+}
+
+@test "a long slug is truncated so the instance name fits the 63 character rds limit" {
+  run instance_name_for "a-very-long-service-name-that-keeps-going-and-going" "cacb7da7-9e34-4ba3-be7a-c2a149c23ead"
+  [ "${#output}" -le 63 ]
+  [[ "$output" == *"-cacb7da7-9e34-4ba3-be7a-c2a149c23ead" ]]
+  [[ "$output" != *"--"* ]]
+}
+
+@test "a slug that does not start with a letter still yields a valid rds identifier" {
+  run instance_name_for "123-orders" "cacb7da7-9e34-4ba3-be7a-c2a149c23ead"
+  [[ "$output" =~ ^[a-z] ]]
+  [ "${#output}" -le 63 ]
+}
+
+@test "an empty slug is rejected" {
+  run instance_name_for "" "cacb7da7-9e34-4ba3-be7a-c2a149c23ead"
+  [ "$status" -ne 0 ]
+}

@@ -44,6 +44,10 @@ MOCK
   cat > "$MOCK_BIN/np" <<MOCK
 #!/usr/bin/env bash
 echo "np \$*" >> "$MOCK_LOG"
+if [ "\$1 \$2" = "service read" ]; then
+  echo '{"id":"$SERVICE_ID","name":"Orders From Api","slug":"orders-from-api"}'
+  exit 0
+fi
 [ "\$1 \$2" = "provider list" ] || { echo "unexpected np call: \$*" >&2; exit 1; }
 nrn=""
 category=""
@@ -191,4 +195,28 @@ run_and_read_network_tfvars() {
   run bash -c "export CONTEXT='$(build_context_json '{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}')'; source '$SERVER_SERVICE_PATH/scripts/aws/build_context'"
   [ "$status" -ne 0 ]
   [[ "$output" == *"at least two"* ]]
+}
+
+run_and_dump_name() {
+  export CONTEXT="$1"
+  run bash -c "source '$SERVER_SERVICE_PATH/scripts/aws/build_context' >/dev/null 2>&1 || exit 1; echo \"INSTANCE_NAME=\$INSTANCE_NAME\""
+}
+
+@test "resources are named after the service slug and id" {
+  run_and_dump_name "$(build_context_json '{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}' | jq -c '.service.slug = "test-fede"')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "INSTANCE_NAME=test-fede-${SERVICE_ID}" ]
+}
+
+@test "the service name is used when the context has no slug" {
+  run_and_dump_name "$(build_context_json '{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}' | jq -c '.service.name = "Test Fede"')"
+  [ "$output" = "INSTANCE_NAME=test-fede-${SERVICE_ID}" ]
+}
+
+@test "the service is read from the api when the context carries neither slug nor name" {
+  run_and_dump_name "$(build_context_json '{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "INSTANCE_NAME=orders-from-api-${SERVICE_ID}" ]
+  run grep -c "service read --id ${SERVICE_ID}" "$MOCK_LOG"
+  [ "$output" = "1" ]
 }

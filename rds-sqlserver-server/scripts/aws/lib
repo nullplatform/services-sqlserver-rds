@@ -71,3 +71,24 @@ provider_attributes() {
     | jq -c '(.results // [])[0].attributes // {}'
 }
 fi
+
+if ! type -t instance_name_for >/dev/null 2>&1; then
+instance_name_for() {
+  local slug="$1" service_id="$2" label max_label
+
+  label=$(echo "$slug" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-*//;s/-*$//')
+  [ -n "$label" ] || die "cannot name the instance: the service has no name"
+
+  if [[ ! "$label" =~ ^[a-z] ]]; then
+    label="db-${label}"
+  fi
+
+  max_label=$((63 - 1 - ${#service_id}))
+  label="${label:0:$max_label}"
+  while [[ "$label" == *- ]]; do
+    label="${label%-}"
+  done
+
+  echo "${label}-${service_id}"
+}
+fi

@@ -5,10 +5,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib"
 
 SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
-SERVICE_NAME=$(echo "$CONTEXT" | jq -r '.service.name // ""')
-SERVICE_NAME="${SERVICE_NAME:-svc-${SERVICE_ID}}"
+SERVICE_SLUG=$(echo "$CONTEXT" | jq -r '.service.slug // .service.name // ""')
 
-INSTANCE_NAME="np-$(echo "$SERVICE_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-*//;s/-*$//' | cut -c1-55)"
+if [ -z "$SERVICE_SLUG" ]; then
+  SERVICE_SLUG=$(np service read --id "$SERVICE_ID" --format json | jq -r '.slug // .name // ""')
+fi
+
+INSTANCE_NAME=$(instance_name_for "$SERVICE_SLUG" "$SERVICE_ID")
 
 SERVICE_ATTRS=$(echo "$CONTEXT" | jq -r '(.service.attributes // {}) * (.parameters // {})')
 
