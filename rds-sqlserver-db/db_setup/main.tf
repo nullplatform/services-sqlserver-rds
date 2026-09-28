@@ -7,7 +7,7 @@ resource "random_password" "user" {
 }
 
 resource "aws_secretsmanager_secret" "app" {
-  name                    = "nullplatform/rds-sqlserver/${var.service_id}/app"
+  name                    = "nullplatform/rds-sqlserver/${var.instance_name}/app"
   recovery_window_in_days = 0
 
   tags = {

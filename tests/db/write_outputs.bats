@@ -37,12 +37,15 @@ echo "np \$*" >> "$MOCK_LOG"
 prev=""
 for arg in "\$@"; do
   if [ "\$prev" = "--body" ]; then
-    if [ -f "\$arg" ]; then
-      cat "\$arg" >> "$BATS_TEST_TMPDIR/body.json"
-    else
-      echo "np: --body is not a readable file: \$arg" >&2
+    body="\$arg"
+    if [[ "\$arg" == *.json ]]; then
+      body=\$(cat "\$arg") || { echo "np: failed to read JSON file: \$arg" >&2; exit 1; }
+    fi
+    if ! printf '%s' "\$body" | jq -e . >/dev/null 2>&1; then
+      echo "request failed with status 400: Body is not valid JSON" >&2
       exit 1
     fi
+    printf '%s' "\$body" >> "$BATS_TEST_TMPDIR/body.json"
   fi
   prev="\$arg"
 done
@@ -105,4 +108,20 @@ MOCK
   [ "$status" -eq 0 ]
   run jq -r '.attributes.jdbc_url' "$BATS_TEST_TMPDIR/body.json"
   [ "$output" = "jdbc:sqlserver://sql.example.rds.amazonaws.com:1433;databaseName=app_42;encrypt=true;trustServerCertificate=true" ]
+}
+
+@test "the link body file path ends in .json" {
+  run "$DB_SERVICE_PATH/scripts/aws/write_link_outputs"
+  [ "$status" -eq 0 ]
+  BODY_PATH=$(grep -o -- "--body [^ ]*" "$MOCK_LOG" | tail -1 | cut -d' ' -f2)
+  [[ "$BODY_PATH" == *.json ]]
+}
+
+@test "the temporary link body directory is removed when the script exits" {
+  run "$DB_SERVICE_PATH/scripts/aws/write_link_outputs"
+  [ "$status" -eq 0 ]
+  BODY_PATH=$(grep -o -- "--body [^ ]*" "$MOCK_LOG" | tail -1 | cut -d' ' -f2)
+  [ -n "$BODY_PATH" ]
+  [ ! -f "$BODY_PATH" ]
+  [ ! -d "$(dirname "$BODY_PATH")" ]
 }

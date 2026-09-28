@@ -18,13 +18,32 @@ if [ -n "${SERVER_HOSTNAME:-}" ]; then
   DB_NAME_VAL="${DB_NAME:-}"
   DB_USERNAME_VAL="${DB_USERNAME:-}"
 
-else
-  if [ "$ACTION_TYPE" = "delete" ]; then
-    echo "Service has no stored hostname — was never created successfully. Skipping DB cleanup."
+elif [ "$ACTION_TYPE" = "delete" ]; then
+  STATE_RC=0
+  DB_SETUP_STATE=$(read_db_setup_state) || STATE_RC=$?
+
+  if [ "$STATE_RC" -eq 1 ]; then
+    die "could not read the db_setup tofu state at s3://${TFSTATE_BUCKET}/${TFSTATE_KEY_PREFIX}db_setup.tfstate"
+  fi
+
+  if [ "$STATE_RC" -eq 2 ] || [ "$(echo "$DB_SETUP_STATE" | jq '.resources // [] | length')" -eq 0 ]; then
+    echo "Service has no stored hostname and no db_setup state — was never created successfully. Skipping DB cleanup."
     export SETUP_SKIPPED=true
     exit 0
   fi
 
+  echo "Service has no stored hostname — recovering the connection from the db_setup tofu state..."
+  DB_HOST=$(echo "$DB_SETUP_STATE"           | jq -r '.outputs.hostname.value          // ""')
+  DB_PORT=$(echo "$DB_SETUP_STATE"           | jq -r '.outputs.port.value              // 1433')
+  MASTER_SECRET_ARN=$(echo "$DB_SETUP_STATE" | jq -r '.outputs.master_secret_arn.value // ""')
+  DB_NAME_VAL=$(echo "$DB_SETUP_STATE"       | jq -r '.outputs.database_name.value     // ""')
+  DB_USERNAME_VAL=$(echo "$DB_SETUP_STATE"   | jq -r '.outputs.db_username.value       // ""')
+
+  if [ -z "$DB_HOST" ] || [ -z "$MASTER_SECRET_ARN" ]; then
+    die "the db_setup tofu state has resources but no hostname or master_secret_arn output"
+  fi
+
+else
   ENTITY_NRN=$(echo "$CONTEXT" | jq -r '.entity_nrn // ""')
   SERVICE_DIMENSIONS=$(echo "$CONTEXT" | jq -c '.service.dimensions // {}')
   echo "Auto-discovering RDS SQL Server instance in ${ENTITY_NRN} (dimensions: ${SERVICE_DIMENSIONS})..."
@@ -83,6 +102,14 @@ fi
 validate_identifier "database name" "$DB_NAME_VAL"
 validate_identifier "database username" "$DB_USERNAME_VAL"
 
+SERVICE_SLUG=$(echo "$CONTEXT" | jq -r '.service.slug // .service.name // ""')
+
+if [ -z "$SERVICE_SLUG" ]; then
+  SERVICE_SLUG=$(np service read --id "$SERVICE_ID" --format json | jq -r '.slug // .name // ""')
+fi
+
+INSTANCE_NAME=$(instance_name_for "$SERVICE_SLUG" "$SERVICE_ID")
+
 export DB_HOST DB_PORT MASTER_SECRET_ARN
 export DB_NAME="$DB_NAME_VAL"
 export DB_USERNAME="$DB_USERNAME_VAL"
@@ -93,4 +120,4 @@ export TOFU_MODULE_DIR="$SERVICE_PATH/db_setup"
 
 export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}db_setup.tfstate -backend-config=region=${REGION}"
 
-export TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=region=${REGION} -var=db_host=${DB_HOST} -var=db_port=${DB_PORT} -var=db_name=${DB_NAME} -var=db_username=${DB_USERNAME} -var=master_secret_arn=${MASTER_SECRET_ARN}"
+export TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=instance_name=${INSTANCE_NAME} -var=region=${REGION} -var=db_host=${DB_HOST} -var=db_port=${DB_PORT} -var=db_name=${DB_NAME} -var=db_username=${DB_USERNAME} -var=master_secret_arn=${MASTER_SECRET_ARN}"

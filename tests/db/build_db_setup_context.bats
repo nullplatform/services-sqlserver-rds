@@ -11,7 +11,7 @@ setup() {
   export OUTPUT_DIR="$BATS_TEST_TMPDIR/work"
   export TFSTATE_BUCKET="acme-tofu-state"
   export TFSTATE_KEY_PREFIX="services/rds-sqlserver/svc-1/"
-  export CONTEXT='{"service":{"id":"svc-1"},"type":"update","entity_nrn":"organization=1:account=2"}'
+  export CONTEXT='{"service":{"id":"svc-1","slug":"payments"},"type":"update","entity_nrn":"organization=1:account=2"}'
 
   export SERVER_HOSTNAME="sql.example.rds.amazonaws.com"
   export SERVER_PORT="1433"
@@ -98,4 +98,86 @@ MOCK
   run "$DB_SERVICE_PATH/scripts/aws/build_db_setup_context"
   [ "$status" -ne 0 ]
   [[ "$output" == *"No active RDS SQL Server instance found"* ]]
+}
+
+@test "resources are named after the service slug and id" {
+  run_and_dump
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-var=instance_name=payments-svc-1"* ]]
+}
+
+@test "the service name is used when the context has no slug" {
+  export CONTEXT='{"service":{"id":"svc-1","name":"Payments DB"},"type":"update"}'
+  run_and_dump
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-var=instance_name=payments-db-svc-1"* ]]
+}
+
+@test "the service is read from the api when the context carries neither slug nor name" {
+  export CONTEXT='{"service":{"id":"svc-1"},"type":"update"}'
+  cat > "$MOCK_BIN/np" <<MOCK
+#!/usr/bin/env bash
+echo "np \$*" >> "$MOCK_LOG"
+[ "\$1 \$2" = "service read" ] && echo '{"id":"svc-1","slug":"from-api"}'
+exit 0
+MOCK
+  run_and_dump
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-var=instance_name=from-api-svc-1"* ]]
+  grep -q "^np service read --id svc-1" "$MOCK_LOG"
+}
+
+write_db_setup_state() {
+  export AWS_MOCK_STATE_FILE="$BATS_TEST_TMPDIR/db_setup.tfstate"
+  cat > "$AWS_MOCK_STATE_FILE" <<'JSON'
+{
+  "version": 4,
+  "outputs": {
+    "hostname":          {"value": "sql.from-state.rds.amazonaws.com"},
+    "port":              {"value": 1433},
+    "master_secret_arn": {"value": "arn:aws:secretsmanager:us-east-1:1:secret:nullplatform/rds-sqlserver/np-x/master"},
+    "database_name":     {"value": "app_42"},
+    "db_username":       {"value": "app_42"}
+  },
+  "resources": [{"type": "aws_secretsmanager_secret", "name": "app"}]
+}
+JSON
+}
+
+run_delete_and_dump() {
+  unset SERVER_HOSTNAME SERVER_PORT SERVER_MASTER_SECRET_ARN DB_NAME DB_USERNAME
+  export CONTEXT='{"service":{"id":"svc-1","slug":"payments"},"type":"delete","entity_nrn":"organization=1:account=2"}'
+  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/build_db_setup_context' 2>&1; \
+    echo \"DB_HOST=\$DB_HOST\"; echo \"MASTER_SECRET_ARN=\$MASTER_SECRET_ARN\"; \
+    echo \"DB_NAME=\$DB_NAME\"; echo \"DB_USERNAME=\$DB_USERNAME\"; \
+    echo \"SETUP_SKIPPED=\${SETUP_SKIPPED:-}\"; echo \"TOFU_VARIABLES=\$TOFU_VARIABLES\""
+}
+
+@test "a delete whose create failed before storing attributes cleans up from the tofu state" {
+  write_db_setup_state
+  run_delete_and_dump
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Skipping DB cleanup"* ]]
+  [[ "$output" == *"DB_HOST=sql.from-state.rds.amazonaws.com"* ]]
+  [[ "$output" == *"MASTER_SECRET_ARN=arn:aws:secretsmanager:us-east-1:1:secret:nullplatform/rds-sqlserver/np-x/master"* ]]
+  [[ "$output" == *"DB_NAME=app_42"* ]]
+  [[ "$output" == *"DB_USERNAME=app_42"* ]]
+  [[ "$output" == *"-var=db_host=sql.from-state.rds.amazonaws.com"* ]]
+  grep -q "get-object key=services/rds-sqlserver/svc-1/db_setup.tfstate" "$MOCK_LOG"
+}
+
+@test "a delete with a state that no longer holds resources skips cleanup" {
+  write_db_setup_state
+  jq '.resources = []' "$AWS_MOCK_STATE_FILE" > "$AWS_MOCK_STATE_FILE.tmp" && mv "$AWS_MOCK_STATE_FILE.tmp" "$AWS_MOCK_STATE_FILE"
+  run_delete_and_dump
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Skipping DB cleanup"* ]]
+}
+
+@test "a delete that cannot read the tofu state fails instead of reporting success" {
+  export AWS_MOCK_STATE_FILE=denied
+  run_delete_and_dump
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"AccessDenied"* ]]
+  [[ "$output" != *"Skipping DB cleanup"* ]]
 }
