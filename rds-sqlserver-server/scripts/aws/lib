@@ -29,3 +29,87 @@ validate_edition_constraints() {
   fi
 }
 fi
+
+if ! type -t instance_class_for_workload >/dev/null 2>&1; then
+instance_class_for_workload() {
+  local edition="$1" workload="$2"
+  local -a classes
+
+  case "$edition" in
+    sqlserver-ex)  classes=(db.t3.small db.t3.medium db.t3.xlarge) ;;
+    sqlserver-web) classes=(db.t3.medium db.m5.large db.m5.xlarge) ;;
+    sqlserver-se)  classes=(db.m5.large db.m5.xlarge db.m5.2xlarge) ;;
+    *) die "Unknown 'Edition' '${edition}'." ;;
+  esac
+
+  case "$workload" in
+    development)      echo "${classes[0]}" ;;
+    production-light) echo "${classes[1]}" ;;
+    production-heavy) echo "${classes[2]}" ;;
+    *) die "Unknown 'Workload' '${workload}'. Choose development, production-light or production-heavy." ;;
+  esac
+}
+fi
+
+if ! type -t context_dimensions >/dev/null 2>&1; then
+context_dimensions() {
+  echo "$1" | jq -r '
+    if (.service.dimensions | type) == "object" and ((.service.dimensions | length) > 0)
+    then [ .service.dimensions | to_entries[] | "\(.key):\(.value)" ] | join(",")
+    else empty end'
+}
+fi
+
+if ! type -t provider_attributes >/dev/null 2>&1; then
+provider_attributes() {
+  local category="$1" nrn="$2" dimensions="$3"
+  np provider list \
+    --nrn "$nrn" \
+    --categories "$category" \
+    ${dimensions:+--dimensions "$dimensions"} \
+    --format json \
+    | jq -c '(.results // [])[0].attributes // {}'
+}
+fi
+
+if ! type -t instance_name_for >/dev/null 2>&1; then
+instance_name_for() {
+  local slug="$1" service_id="$2" label max_label
+
+  label=$(echo "$slug" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-*//;s/-*$//')
+  [ -n "$label" ] || die "cannot name the instance: the service has no name"
+
+  if [[ ! "$label" =~ ^[a-z] ]]; then
+    label="db-${label}"
+  fi
+
+  max_label=$((63 - 1 - ${#service_id}))
+  label="${label:0:$max_label}"
+  while [[ "$label" == *- ]]; do
+    label="${label%-}"
+  done
+
+  echo "${label}-${service_id}"
+}
+fi
+
+if ! type -t kms_key_from_state >/dev/null 2>&1; then
+kms_key_from_state() {
+  local bucket="$1" key="$2" region="$3" destination="$4" error
+
+  if ! error=$(aws s3 cp "s3://${bucket}/${key}" "$destination" --region "$region" 2>&1 >/dev/null); then
+    if [[ "$error" == *"(404)"* || "$error" == *"NoSuchKey"* || "$error" == *"does not exist"* ]]; then
+      return 2
+    fi
+    echo "$error" >&2
+    return 1
+  fi
+
+  jq -r '
+    [.resources[]? | select(.mode == "managed")] as $resources
+    | ($resources | map(select(.type == "aws_db_instance" and .name == "main")) | .[0].instances[0].attributes.kms_key_id // "") as $instance_key
+    | if $instance_key == "" then ""
+      elif ($resources | any(.type == "aws_kms_key" and .name == "rds")) then "managed"
+      else $instance_key end' "$destination"
+}
+fi

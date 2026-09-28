@@ -49,9 +49,10 @@ echo "  username:      $USERNAME"
 echo "  database_name: $DATABASE_NAME"
 echo "  password:      ****"
 
-BODY_FILE=$(mktemp)
-trap 'rm -f "$BODY_FILE"' EXIT
-chmod 600 "$BODY_FILE"
+BODY_DIR=$(mktemp -d)
+trap 'rm -rf "$BODY_DIR"' EXIT
+chmod 700 "$BODY_DIR"
+BODY_FILE="$BODY_DIR/body.json"
 jq -n --argjson attributes "$ATTRS" '{attributes: $attributes}' > "$BODY_FILE"
 
 np link patch --id "$LINK_ID_VAL" --body "$BODY_FILE"

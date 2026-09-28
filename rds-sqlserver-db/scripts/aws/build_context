@@ -6,7 +6,21 @@ source "$SCRIPT_DIR/lib"
 
 SERVICE_ID=$(echo "$CONTEXT" | jq -r '.service.id')
 
-REGION=$(yaml_value "region" "us-east-1" "$VALUES")
+ENTITY_NRN=$(echo "$CONTEXT" | jq -r '.entity_nrn // .service.nrn // ""')
+
+if [ -z "$ENTITY_NRN" ]; then
+  die "could not read the service NRN from .entity_nrn in context"
+fi
+
+DIMENSIONS=$(context_dimensions "$CONTEXT")
+REGION=$(provider_attributes "cloud-providers" "$ENTITY_NRN" "$DIMENSIONS" | jq -r '.account.region // ""')
+
+if [ -z "$REGION" ]; then
+  die "no cloud-providers provider with account.region found for ${ENTITY_NRN}${DIMENSIONS:+ (dimensions: ${DIMENSIONS})}"
+fi
+
+echo "Using region: ${REGION}"
+export REGION
 AWS_PROFILE_VAL=$(yaml_value "aws_profile" "" "$VALUES")
 
 if [ -n "${AWS_PROFILE_VAL}" ] && [ -z "${AWS_PROFILE:-}" ]; then

@@ -5,7 +5,7 @@ variable "service_id" {
 
 variable "instance_name" {
   type        = string
-  description = "Unique instance name for AWS resource naming (format: np-<service_name>)"
+  description = "Unique instance name for AWS resource naming (format: <service_slug>-<service_id>, at most 63 characters)"
 }
 
 variable "region" {
@@ -17,6 +17,16 @@ variable "region" {
 variable "vpc_id" {
   type        = string
   description = "VPC ID where the RDS instance will be deployed"
+}
+
+variable "subnet_ids" {
+  type        = list(string)
+  description = "Subnets for the DB subnet group, from vpc.subnets of the vpc provider"
+
+  validation {
+    condition     = length(var.subnet_ids) >= 2
+    error_message = "subnet_ids needs at least two subnets in different availability zones"
+  }
 }
 
 variable "edition" {
@@ -48,18 +58,6 @@ variable "sqlserver_version" {
   description = "SQL Server major version"
 }
 
-variable "timezone" {
-  type        = string
-  default     = null
-  description = "Server-level timezone. Cannot be changed after creation."
-}
-
-variable "collation" {
-  type        = string
-  default     = null
-  description = "Server-level collation. Cannot be changed after creation."
-}
-
 variable "multi_az" {
   type        = bool
   default     = false
@@ -88,4 +86,10 @@ variable "secret_kms_key_id" {
   type        = string
   default     = null
   description = "KMS key ID or ARN used to encrypt the RDS master secret in Secrets Manager. If not set, AWS encrypts it with the default aws/secretsmanager managed key."
+}
+
+variable "kms_key_arn" {
+  type        = string
+  default     = null
+  description = "ARN of an existing KMS key for RDS storage encryption. When null, the module creates a dedicated key."
 }

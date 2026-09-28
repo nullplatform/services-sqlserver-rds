@@ -4,7 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib"
 
-REGION=$(yaml_value "region" "us-east-1" "$VALUES")
+if [ -z "${REGION:-}" ]; then
+  die "REGION is not set. Expected to be exported by build_context."
+fi
 
 if [ -z "${TFSTATE_BUCKET:-}" ]; then
   die "TFSTATE_BUCKET is not set. Expected to be exported by build_context."
