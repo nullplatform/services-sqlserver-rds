@@ -68,10 +68,28 @@ fetch_master_credentials() {
 }
 fi
 
+SQLCMD_VERSION="1.10.0"
+
 if ! type -t require_sqlcmd >/dev/null 2>&1; then
 require_sqlcmd() {
+  local tool="github:microsoft/go-sqlcmd@${SQLCMD_VERSION}"
+  local bin_dir
+
+  if command -v sqlcmd >/dev/null 2>&1; then
+    return 0
+  fi
+
+  command -v mise >/dev/null 2>&1 \
+    || die "sqlcmd not found in PATH and mise is not available to install go-sqlcmd"
+
+  echo "Installing go-sqlcmd v${SQLCMD_VERSION} with mise..."
+  mise install "$tool" >&2 || die "could not install go-sqlcmd v${SQLCMD_VERSION} with mise"
+
+  bin_dir=$(mise bin-paths "$tool") || die "mise installed go-sqlcmd but did not report its bin path"
+  export PATH="${bin_dir}:$PATH"
+
   command -v sqlcmd >/dev/null 2>&1 \
-    || die "sqlcmd not found in PATH — the service image must bundle go-sqlcmd"
+    || die "go-sqlcmd was installed with mise but sqlcmd is still not in PATH"
 }
 fi
 
@@ -112,4 +130,51 @@ access_level_flags() {
     *)          die "unknown access level '$1' (expected read, write or read-write)" ;;
   esac
 }
+fi
+
+if ! type -t instance_name_for >/dev/null 2>&1; then
+instance_name_for() {
+  local slug="$1" service_id="$2" label max_label
+
+  label=$(echo "$slug" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-*//;s/-*$//')
+  [ -n "$label" ] || die "cannot name the resources: the service has no name"
+
+  if [[ ! "$label" =~ ^[a-z] ]]; then
+    label="db-${label}"
+  fi
+
+  max_label=$((63 - 1 - ${#service_id}))
+  label="${label:0:$max_label}"
+  while [[ "$label" == *- ]]; do
+    label="${label%-}"
+  done
+
+  echo "${label}-${service_id}"
+}
+fi
+
+if ! type -t read_db_setup_state >/dev/null 2>&1; then
+read_db_setup_state() (
+  local key="${TFSTATE_KEY_PREFIX}db_setup.tfstate" rc=0
+
+  state_file=$(mktemp)
+  err_file=$(mktemp)
+  trap 'rm -f "$state_file" "$err_file"' EXIT
+  aws s3api get-object \
+    --bucket "$TFSTATE_BUCKET" \
+    --key "$key" \
+    --region "$REGION" \
+    "$state_file" >/dev/null 2>"$err_file" || rc=$?
+
+  if [ "$rc" -eq 0 ]; then
+    cat "$state_file"
+  elif grep -q "NoSuchKey" "$err_file"; then
+    rc=2
+  else
+    cat "$err_file" >&2
+    rc=1
+  fi
+
+  exit "$rc"
+)
 fi

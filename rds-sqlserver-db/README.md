@@ -25,7 +25,10 @@ instances at the same NRN.
 
 Terraform (`db_setup/`) generates the application password and mirrors the
 credentials into Secrets Manager. Everything inside the engine is idempotent
-T-SQL under [`sql/`](sql), run with `sqlcmd`:
+T-SQL under [`sql/`](sql), run with `sqlcmd`. When the agent has no `sqlcmd`
+on its `PATH`, the scripts install the pinned go-sqlcmd release with `mise`.
+The Secrets Manager secret is named
+`nullplatform/rds-sqlserver/<service slug>-<service id>/app`.
 
 | Step | Runs against | Script |
 |---|---|---|
@@ -60,6 +63,10 @@ Service delete removes the login, the database user and the Secrets Manager
 secret. **The database itself is left in place** so application data is never
 destroyed by a service lifecycle action. RDS would require
 `rdsadmin.dbo.rds_drop_database` to remove it anyway.
+
+A delete on a service whose create failed before writing its attributes still
+cleans up: the connection is recovered from the `db_setup` tofu state. Only a
+service with no state is treated as never created.
 
 Unlink removes role memberships only; the database, login and user all
 survive, so access can be re-granted later.

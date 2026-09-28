@@ -107,3 +107,118 @@ setup() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"master secret ARN is empty"* ]]
 }
+
+@test "require_sqlcmd uses the sqlcmd already on PATH without calling mise" {
+  make_sqlcmd_mock 0
+  make_mise_mock 0
+  run require_sqlcmd
+  [ "$status" -eq 0 ]
+  [ "$(calls_matching '^mise ')" -eq 0 ]
+}
+
+@test "require_sqlcmd installs the pinned go-sqlcmd with mise when sqlcmd is missing" {
+  make_mise_mock 0
+  PATH="$MOCK_BIN:/usr/bin:/bin"
+  require_sqlcmd
+  grep -q "^mise install github:microsoft/go-sqlcmd@${SQLCMD_VERSION}$" "$MOCK_LOG"
+  [ "$(command -v sqlcmd)" = "$MISE_INSTALLS/github-microsoft-go-sqlcmd-${SQLCMD_VERSION}/sqlcmd" ]
+}
+
+@test "require_sqlcmd fails when mise cannot install go-sqlcmd" {
+  make_mise_mock 1
+  PATH="$MOCK_BIN:/usr/bin:/bin"
+  run require_sqlcmd
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"could not install go-sqlcmd"* ]]
+}
+
+@test "require_sqlcmd fails when neither sqlcmd nor mise is available" {
+  PATH="$MOCK_BIN:/usr/bin:/bin"
+  run require_sqlcmd
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"mise is not available"* ]]
+}
+
+@test "require_sqlcmd fails when mise reports a bin path that has no sqlcmd binary" {
+  make_mise_mock_missing_binary
+  PATH="$MOCK_BIN:/usr/bin:/bin"
+  run require_sqlcmd
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sqlcmd is still not in PATH"* ]]
+  [ "$(calls_matching '^mise install ')" -eq 1 ]
+  [ "$(calls_matching '^mise bin-paths ')" -eq 1 ]
+}
+
+@test "instance_name_for joins the slug and the service id" {
+  run instance_name_for "payments" "8d18101b-5355-496e-8fb4-6a2af580a6b6"
+  [ "$status" -eq 0 ]
+  [ "$output" = "payments-8d18101b-5355-496e-8fb4-6a2af580a6b6" ]
+}
+
+@test "instance_name_for keeps only lowercase letters digits and single hyphens" {
+  run instance_name_for "My__Payments.DB" "8d18101b-5355-496e-8fb4-6a2af580a6b6"
+  [ "$output" = "my-payments-db-8d18101b-5355-496e-8fb4-6a2af580a6b6" ]
+}
+
+@test "instance_name_for rejects an empty slug" {
+  run instance_name_for "" "8d18101b-5355-496e-8fb4-6a2af580a6b6"
+  [ "$status" -ne 0 ]
+}
+
+@test "read_db_setup_state leaves no temp files behind on success" {
+  make_mktemp_mock
+  make_aws_mock
+  export TFSTATE_BUCKET="acme-tofu-state"
+  export TFSTATE_KEY_PREFIX="services/rds-sqlserver/svc-1/"
+  export REGION="us-east-1"
+  export AWS_MOCK_STATE_FILE="$BATS_TEST_TMPDIR/db_setup.tfstate"
+  echo '{"resources":[],"outputs":{}}' > "$AWS_MOCK_STATE_FILE"
+
+  run read_db_setup_state
+  [ "$status" -eq 0 ]
+
+  local count=0 path
+  while read -r path; do
+    count=$((count + 1))
+    [ ! -e "$path" ]
+  done < <(awk '/^mktemp-created /{print $2}' "$MOCK_LOG")
+  [ "$count" -eq 2 ]
+}
+
+@test "read_db_setup_state leaves no temp files behind when the key does not exist" {
+  make_mktemp_mock
+  make_aws_mock
+  export TFSTATE_BUCKET="acme-tofu-state"
+  export TFSTATE_KEY_PREFIX="services/rds-sqlserver/svc-1/"
+  export REGION="us-east-1"
+  unset AWS_MOCK_STATE_FILE
+
+  run read_db_setup_state
+  [ "$status" -eq 2 ]
+
+  local count=0 path
+  while read -r path; do
+    count=$((count + 1))
+    [ ! -e "$path" ]
+  done < <(awk '/^mktemp-created /{print $2}' "$MOCK_LOG")
+  [ "$count" -eq 2 ]
+}
+
+@test "read_db_setup_state leaves no temp files behind when the read is denied" {
+  make_mktemp_mock
+  make_aws_mock
+  export TFSTATE_BUCKET="acme-tofu-state"
+  export TFSTATE_KEY_PREFIX="services/rds-sqlserver/svc-1/"
+  export REGION="us-east-1"
+  export AWS_MOCK_STATE_FILE="denied"
+
+  run read_db_setup_state
+  [ "$status" -eq 1 ]
+
+  local count=0 path
+  while read -r path; do
+    count=$((count + 1))
+    [ ! -e "$path" ]
+  done < <(awk '/^mktemp-created /{print $2}' "$MOCK_LOG")
+  [ "$count" -eq 2 ]
+}

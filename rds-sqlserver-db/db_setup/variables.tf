@@ -3,6 +3,11 @@ variable "service_id" {
   description = "Nullplatform service ID"
 }
 
+variable "instance_name" {
+  type        = string
+  description = "Unique instance name for AWS resource naming (format: <service_slug>-<service_id>, at most 63 characters)"
+}
+
 variable "region" {
   type        = string
   default     = "us-east-1"
