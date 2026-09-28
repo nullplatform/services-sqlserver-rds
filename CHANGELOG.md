@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.1.0...v0.2.0) (2026-09-28)
+
+
+### Features
+
+* output the agent association id from the db install ([591b067](https://github.com/nullplatform/services-sqlserver-rds/commit/591b0676cee919f0f0123b518e4c04ca59d442ef))
+
 ## [0.1.0](https://github.com/nullplatform/services-sqlserver-rds/compare/v1.0.1...v0.1.0) (2026-09-28)
 
 
