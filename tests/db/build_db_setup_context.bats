@@ -11,6 +11,7 @@ setup() {
   export OUTPUT_DIR="$BATS_TEST_TMPDIR/work"
   export TFSTATE_BUCKET="acme-tofu-state"
   export TFSTATE_KEY_PREFIX="services/rds-sqlserver/svc-1/"
+  export REGION="ap-south-1"
   export CONTEXT='{"service":{"id":"svc-1","slug":"payments"},"type":"update","entity_nrn":"organization=1:account=2"}'
 
   export SERVER_HOSTNAME="sql.example.rds.amazonaws.com"
@@ -180,4 +181,18 @@ run_delete_and_dump() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"AccessDenied"* ]]
   [[ "$output" != *"Skipping DB cleanup"* ]]
+}
+
+@test "the region exported by build_context reaches the backend and the module" {
+  run_and_dump
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-backend-config=region=ap-south-1"* ]]
+  [[ "$output" == *"-var=region=ap-south-1"* ]]
+}
+
+@test "a missing region from build_context fails instead of defaulting" {
+  unset REGION
+  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/build_db_setup_context'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"REGION is not set"* ]]
 }

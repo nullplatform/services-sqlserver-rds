@@ -10,8 +10,9 @@ setup() {
 
   export SERVICE_PATH="$DB_SERVICE_PATH"
   export VALUES="$DB_SERVICE_PATH/values.yaml"
-  export CONTEXT="{\"service\":{\"id\":\"${SERVICE_ID}\"}}"
+  export CONTEXT="{\"entity_nrn\":\"organization=1:account=2\",\"service\":{\"id\":\"${SERVICE_ID}\"}}"
   export RDS_SQL_SERVER_S3_STATE_BUCKET="$BUCKET"
+  export REGION="us-east-1"
 
   printf '%s\n' "$BUCKET" > "$BATS_TEST_TMPDIR/existing_buckets"
   export EXISTING_BUCKETS="$BATS_TEST_TMPDIR/existing_buckets"
@@ -39,7 +40,10 @@ MOCK
 
   cat > "$MOCK_BIN/np" <<'MOCK'
 #!/usr/bin/env bash
-echo '{"attributes":{}}'
+case "$1 $2" in
+  "provider list") echo '{"results":[{"attributes":{"account":{"region":"us-east-1"}}}]}' ;;
+  *) echo '{"attributes":{}}' ;;
+esac
 MOCK
   chmod +x "$MOCK_BIN/np"
 }
@@ -101,6 +105,17 @@ MOCK
   [ "$status" -eq 0 ]
   run grep -c -- "--prefix services/rds-sqlserver/${SERVICE_ID}/" "$MOCK_LOG"
   [ "$output" = "2" ]
+}
+
+@test "cleanup without the region from build_context fails instead of defaulting" {
+  export TFSTATE_BUCKET="$BUCKET"
+  export TFSTATE_KEY_PREFIX="services/rds-sqlserver/${SERVICE_ID}/"
+  unset REGION
+  run "$DB_SERVICE_PATH/scripts/aws/delete_tfstate_objects"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"REGION is not set"* ]]
+  run grep -c "list-object-versions" "$MOCK_LOG"
+  [ "$output" = "0" ]
 }
 
 @test "cleanup never deletes the bucket itself" {

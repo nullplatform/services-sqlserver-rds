@@ -92,8 +92,9 @@ as `state_bucket_name` to `specs/requirements/aws`.
 
 ## Configuration
 
-`values.yaml` holds the region, an optional local AWS profile, an optional
-`server_specification_id`, and `sqlcmd_connect_flags`. The last one exists
+The region comes from the `cloud-providers` provider of the service's NRN and
+dimensions, like the server's. `values.yaml` holds an optional local AWS
+profile, an optional `server_specification_id`, and `sqlcmd_connect_flags`. The last one exists
 because go-sqlcmd has changed how `--encrypt-connection` is spelled between
 releases; keeping the flags in one place makes that a configuration fix rather
 than a code change.
