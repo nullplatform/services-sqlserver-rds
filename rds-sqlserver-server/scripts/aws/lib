@@ -92,3 +92,24 @@ instance_name_for() {
   echo "${label}-${service_id}"
 }
 fi
+
+if ! type -t kms_key_from_state >/dev/null 2>&1; then
+kms_key_from_state() {
+  local bucket="$1" key="$2" region="$3" destination="$4" error
+
+  if ! error=$(aws s3 cp "s3://${bucket}/${key}" "$destination" --region "$region" 2>&1 >/dev/null); then
+    if [[ "$error" == *"(404)"* || "$error" == *"NoSuchKey"* || "$error" == *"does not exist"* ]]; then
+      return 2
+    fi
+    echo "$error" >&2
+    return 1
+  fi
+
+  jq -r '
+    [.resources[]? | select(.mode == "managed")] as $resources
+    | ($resources | map(select(.type == "aws_db_instance" and .name == "main")) | .[0].instances[0].attributes.kms_key_id // "") as $instance_key
+    | if $instance_key == "" then ""
+      elif ($resources | any(.type == "aws_kms_key" and .name == "rds")) then "managed"
+      else $instance_key end' "$destination"
+}
+fi

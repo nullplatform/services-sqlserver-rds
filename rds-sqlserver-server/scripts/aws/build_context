@@ -21,6 +21,7 @@ ALLOCATED_STORAGE=$(echo "$SERVICE_ATTRS" | jq -r '.allocated_storage // 20')
 SQLSERVER_VERSION=$(echo "$SERVICE_ATTRS" | jq -r '.sqlserver_version // "16.00"')
 MULTI_AZ=$(echo "$SERVICE_ATTRS"          | jq -r '.multi_az          // false')
 SECRET_KMS_KEY_ID="${RDS_SQL_SERVER_SECRET_KMS_KEY_ID:-}"
+ACTION_TYPE=$(echo "$CONTEXT" | jq -r '.type // ""')
 
 validate_edition_constraints "$EDITION" "$ALLOCATED_STORAGE" "$MULTI_AZ"
 
@@ -96,6 +97,28 @@ OUTPUT_DIR="/tmp/np-service-${SERVICE_ID}"
 export OUTPUT_DIR
 mkdir -p "$OUTPUT_DIR"
 
+STATE_STATUS=0
+STATE_KMS_KEY=$(kms_key_from_state "$TFSTATE_BUCKET" "${TFSTATE_KEY_PREFIX}terraform.tfstate" "$REGION" "$OUTPUT_DIR/previous-state.json") || STATE_STATUS=$?
+
+if [ "$STATE_STATUS" -eq 1 ]; then
+  die "could not read the tofu state at s3://${TFSTATE_BUCKET}/${TFSTATE_KEY_PREFIX}terraform.tfstate to find the instance's KMS key"
+fi
+
+case "$STATE_KMS_KEY" in
+  managed) KMS_KEY_ARN="" ;;
+  "")
+    KMS_KEY_ARN=""
+    if [ "$ACTION_TYPE" = "create" ]; then
+      KMS_KEY_ARN="${RDS_SQL_SERVER_KMS_KEY_ARN:-}"
+    fi
+    ;;
+  *) KMS_KEY_ARN="$STATE_KMS_KEY" ;;
+esac
+
+if [ -n "$KMS_KEY_ARN" ] && [[ ! "$KMS_KEY_ARN" =~ ^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$ ]]; then
+  die "'${KMS_KEY_ARN}' is not a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>)"
+fi
+
 jq -n --argjson subnet_ids "$SUBNET_IDS" '{subnet_ids: $subnet_ids}' > "$OUTPUT_DIR/network.auto.tfvars.json"
 
 export TOFU_MODULE_DIR="$SERVICE_PATH/deployment"
@@ -106,6 +129,11 @@ TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=instance_name=${INSTANCE_NAME
 
 if [ -n "$SECRET_KMS_KEY_ID" ]; then
   TOFU_VARIABLES="${TOFU_VARIABLES} -var=secret_kms_key_id=${SECRET_KMS_KEY_ID}"
+fi
+
+if [ -n "$KMS_KEY_ARN" ]; then
+  echo "Using external KMS key for storage: ${KMS_KEY_ARN}"
+  TOFU_VARIABLES="${TOFU_VARIABLES} -var=kms_key_arn=${KMS_KEY_ARN}"
 fi
 
 export TOFU_VARIABLES

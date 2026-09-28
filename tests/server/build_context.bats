@@ -27,6 +27,7 @@ setup() {
   export VALUES="$SERVER_SERVICE_PATH/values.yaml"
   export RDS_SQL_SERVER_S3_STATE_BUCKET="$BUCKET"
   unset RDS_SQL_SERVER_SECRET_KMS_KEY_ID
+  unset RDS_SQL_SERVER_KMS_KEY_ARN
   export MOCK_SUBNETS="$SUBNETS"
 
   cat > "$MOCK_BIN/aws" <<MOCK
@@ -35,6 +36,17 @@ echo "aws \$*" >> "$MOCK_LOG"
 case "\$1 \$2" in
   "s3api head-bucket")
     exit 0
+    ;;
+  "s3 cp")
+    if [ -n "\${MOCK_STATE_ERROR:-}" ]; then
+      echo "fatal error: An error occurred (403) when calling the HeadObject operation: Forbidden" >&2
+      exit 1
+    fi
+    if [ -z "\${MOCK_STATE_FILE:-}" ]; then
+      echo "fatal error: An error occurred (404) when calling the HeadObject operation: Key \"\$3\" does not exist" >&2
+      exit 1
+    fi
+    cp "\$MOCK_STATE_FILE" "\$4"
     ;;
 esac
 exit 0
@@ -219,4 +231,89 @@ run_and_dump_name() {
   [ "$output" = "INSTANCE_NAME=orders-from-api-${SERVICE_ID}" ]
   run grep -c "service read --id ${SERVICE_ID}" "$MOCK_LOG"
   [ "$output" = "1" ]
+}
+
+EXTERNAL_KEY="arn:aws:kms:us-east-1:111111111111:key/aaaa-bbbb"
+STATE_KEY="arn:aws:kms:us-east-1:111111111111:key/cccc-dddd"
+
+context_of_type() {
+  build_context_json "$2" | jq -c --arg type "$1" '.type = $type'
+}
+
+write_state() {
+  local instance_key="$1" managed="$2"
+  export MOCK_STATE_FILE="$BATS_TEST_TMPDIR/state.json"
+  jq -n --arg key "$instance_key" --argjson managed "$managed" '{version: 4, resources: (
+    [{mode: "managed", type: "aws_db_instance", name: "main", instances: [{attributes: {kms_key_id: $key}}]}]
+    + (if $managed then [{mode: "managed", type: "aws_kms_key", name: "rds", instances: [{index_key: 0, attributes: {arn: $key}}]}] else [] end))}' > "$MOCK_STATE_FILE"
+}
+
+ATTRS='{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}'
+
+@test "a first create with the kms key env var uses that key instead of creating one" {
+  export RDS_SQL_SERVER_KMS_KEY_ARN="$EXTERNAL_KEY"
+  run_and_dump "$(context_of_type create "$ATTRS")"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-var=kms_key_arn=${EXTERNAL_KEY}"* ]]
+}
+
+@test "a first create without the kms key env var lets the module create its own key" {
+  run_and_dump "$(context_of_type create "$ATTRS")"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"-var=kms_key_arn="* ]]
+}
+
+@test "an update of an instance on its own key ignores the env var" {
+  write_state "arn:aws:kms:us-east-1:111111111111:key/managed" true
+  export RDS_SQL_SERVER_KMS_KEY_ARN="$EXTERNAL_KEY"
+  run_and_dump "$(context_of_type update "$ATTRS")"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"-var=kms_key_arn="* ]]
+}
+
+@test "an update of an instance on an external key keeps the key from the state" {
+  write_state "$STATE_KEY" false
+  export RDS_SQL_SERVER_KMS_KEY_ARN="$EXTERNAL_KEY"
+  run_and_dump "$(context_of_type update "$ATTRS")"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-var=kms_key_arn=${STATE_KEY}"* ]]
+  [[ "$output" != *"${EXTERNAL_KEY}"* ]]
+}
+
+@test "a retried create keeps the key the instance already has even if the env var changed" {
+  write_state "$STATE_KEY" false
+  export RDS_SQL_SERVER_KMS_KEY_ARN="$EXTERNAL_KEY"
+  run_and_dump "$(context_of_type create "$ATTRS")"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-var=kms_key_arn=${STATE_KEY}"* ]]
+}
+
+@test "a retried create of an instance on its own key never switches to the env var" {
+  write_state "arn:aws:kms:us-east-1:111111111111:key/managed" true
+  export RDS_SQL_SERVER_KMS_KEY_ARN="$EXTERNAL_KEY"
+  run_and_dump "$(context_of_type create "$ATTRS")"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"-var=kms_key_arn="* ]]
+}
+
+@test "a delete of an instance on an external key passes that key" {
+  write_state "$STATE_KEY" false
+  run_and_dump "$(context_of_type delete "$ATTRS")"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-var=kms_key_arn=${STATE_KEY}"* ]]
+}
+
+@test "an unreadable state stops before tofu instead of guessing the key" {
+  export MOCK_STATE_ERROR=1
+  export RDS_SQL_SERVER_KMS_KEY_ARN="$EXTERNAL_KEY"
+  run bash -c "export CONTEXT='$(context_of_type update "$ATTRS")'; source '$SERVER_SERVICE_PATH/scripts/aws/build_context'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"could not read the tofu state"* ]]
+}
+
+@test "an env var kms key that is not a kms key arn is rejected before tofu" {
+  export RDS_SQL_SERVER_KMS_KEY_ARN="alias/my-key"
+  run bash -c "export CONTEXT='$(context_of_type create '{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}')'; source '$SERVER_SERVICE_PATH/scripts/aws/build_context'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not a KMS key ARN"* ]]
 }

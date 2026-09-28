@@ -67,6 +67,16 @@ State lives in the bucket named by `RDS_SQL_SERVER_S3_STATE_BUCKET`, under
 exist. See the repository README for the full picture, and pass the same name
 as `state_bucket_name` to `specs/requirements/aws`.
 
+## Storage encryption key
+
+By default each instance gets its own customer-managed KMS key. Set
+`RDS_SQL_SERVER_KMS_KEY_ARN` on the agent to encrypt new instances with an
+existing key instead; no key is created then. The variable only applies while
+the tofu state has no instance yet: once it exists, its key comes from the
+state, so setting or changing the variable later never re-encrypts (and so
+never replaces) an existing instance. List the key in `external_kms_key_arns` of `specs/requirements/aws` so
+the role can use it.
+
 ## Master secret encryption
 
 The master password secret is encrypted with the KMS key named by the optional
