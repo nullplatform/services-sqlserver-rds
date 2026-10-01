@@ -317,3 +317,46 @@ ATTRS='{"edition":"sqlserver-ex","allocated_storage":20,"multi_az":false}'
   [ "$status" -ne 0 ]
   [[ "$output" == *"not a KMS key ARN"* ]]
 }
+
+write_network_state() {
+  export MOCK_STATE_FILE="$BATS_TEST_TMPDIR/state.json"
+  jq -n '{version: 4, resources: [
+    {mode: "managed", type: "aws_security_group", name: "rds", instances: [{attributes: {vpc_id: "vpc-original"}}]},
+    {mode: "managed", type: "aws_db_subnet_group", name: "main", instances: [{attributes: {subnet_ids: ["subnet-old-2", "subnet-old-1"]}}]},
+    {mode: "managed", type: "aws_db_instance", name: "main", instances: [{attributes: {arn: "arn:aws:rds:us-west-2:111111111111:db:orders", kms_key_id: ""}}]}]}' > "$MOCK_STATE_FILE"
+}
+
+@test "an update of an existing instance keeps the vpc and region from its state" {
+  write_network_state
+  run_and_dump "$(context_of_type update "$ATTRS")"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-var=vpc_id=vpc-original "* ]]
+  [[ "$output" == *"-var=region=us-west-2 "* ]]
+}
+
+@test "an update of an existing instance keeps the subnets from its state" {
+  write_network_state
+  run_and_read_network_tfvars "$(context_of_type update "$ATTRS")"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -c '.subnet_ids')" = '["subnet-old-1","subnet-old-2"]' ]
+}
+
+@test "an update warns when the providers resolve a different network than the state" {
+  write_network_state
+  export CONTEXT="$(context_of_type update "$ATTRS")"
+  run bash -c "source '$SERVER_SERVICE_PATH/scripts/aws/build_context' 2>&1 >/dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"keeping vpc-original"* ]]
+  [[ "$output" == *"subnets"* ]]
+}
+
+@test "a state with the same subnets in another order is not reported as a change" {
+  export MOCK_STATE_FILE="$BATS_TEST_TMPDIR/state.json"
+  jq -n --argjson subnets "$SUBNETS" --arg vpc "$VPC_ID" '{version: 4, resources: [
+    {mode: "managed", type: "aws_security_group", name: "rds", instances: [{attributes: {vpc_id: $vpc}}]},
+    {mode: "managed", type: "aws_db_subnet_group", name: "main", instances: [{attributes: {subnet_ids: ($subnets | reverse)}}]}]}' > "$MOCK_STATE_FILE"
+  export CONTEXT="$(context_of_type update "$ATTRS")"
+  run bash -c "source '$SERVER_SERVICE_PATH/scripts/aws/build_context' 2>&1 >/dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"WARNING"* ]]
+}
