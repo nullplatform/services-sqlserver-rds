@@ -104,6 +104,29 @@ if [ "$STATE_STATUS" -eq 1 ]; then
   die "could not read the tofu state at s3://${TFSTATE_BUCKET}/${TFSTATE_KEY_PREFIX}terraform.tfstate to find the instance's KMS key"
 fi
 
+if [ "$STATE_STATUS" -eq 0 ]; then
+  STATE_FILE="$OUTPUT_DIR/previous-state.json"
+  STATE_VPC_ID=$(jq -r '[.resources[]? | select(.mode == "managed" and .type == "aws_security_group" and .name == "rds")][0].instances[0].attributes.vpc_id // ""' "$STATE_FILE")
+  STATE_SUBNET_IDS=$(jq -c '[.resources[]? | select(.mode == "managed" and .type == "aws_db_subnet_group" and .name == "main")][0].instances[0].attributes.subnet_ids // [] | sort' "$STATE_FILE")
+  STATE_REGION=$(jq -r '[.resources[]? | select(.mode == "managed" and .type == "aws_db_instance" and .name == "main")][0].instances[0].attributes.arn // "" | split(":") | .[3] // ""' "$STATE_FILE")
+
+  if [ -n "$STATE_VPC_ID" ] && [ "$STATE_VPC_ID" != "$VPC_ID" ]; then
+    echo "WARNING: the vpc provider resolves ${VPC_ID}, but this instance lives in ${STATE_VPC_ID}; keeping ${STATE_VPC_ID} so the instance is not replaced." >&2
+    VPC_ID="$STATE_VPC_ID"
+  fi
+
+  if [ "$STATE_SUBNET_IDS" != "[]" ] && [ "$STATE_SUBNET_IDS" != "$(echo "$SUBNET_IDS" | jq -c 'sort')" ]; then
+    echo "WARNING: the vpc provider resolves subnets ${SUBNET_IDS}, but this instance uses ${STATE_SUBNET_IDS}; keeping them so the instance is not replaced." >&2
+    SUBNET_IDS="$STATE_SUBNET_IDS"
+  fi
+
+  if [ -n "$STATE_REGION" ] && [ "$STATE_REGION" != "$REGION" ]; then
+    echo "WARNING: the cloud-providers provider resolves ${REGION}, but this instance lives in ${STATE_REGION}; keeping ${STATE_REGION}." >&2
+    REGION="$STATE_REGION"
+    export REGION
+  fi
+fi
+
 case "$STATE_KMS_KEY" in
   managed) KMS_KEY_ARN="" ;;
   "")
