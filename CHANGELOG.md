@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.2.0...v0.2.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency opentofu/opentofu to v1.13.1 ([#12](https://github.com/nullplatform/services-sqlserver-rds/issues/12)) ([cbf4798](https://github.com/nullplatform/services-sqlserver-rds/commit/cbf4798351dff0b5a9682ccea9e547f1ed1a5fce))
+
 ## [0.2.0](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.1.0...v0.2.0) (2026-09-28)
 
 
