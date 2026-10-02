@@ -2,7 +2,7 @@
 
 load '../helpers/common'
 
-PINNED="1.12.6"
+PINNED="1.13.1"
 
 setup() {
   setup_mock_bin
@@ -55,10 +55,10 @@ MOCK
 
 @test "a PATH tofu newer than the pin is used as is" {
   setup_no_download
-  fake_tofu_at "$MOCK_BIN/tofu" "1.13.0"
+  fake_tofu_at "$MOCK_BIN/tofu" "1.14.0"
   run "$(script_under_test rds-sqlserver-db)"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Using tofu v1.13.0"* ]]
+  [[ "$output" == *"Using tofu v1.14.0"* ]]
   run grep -c "^curl " "$MOCK_LOG"
   [ "$output" = "0" ]
 }

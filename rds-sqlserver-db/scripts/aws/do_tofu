@@ -13,7 +13,7 @@ if [ -z "${TOFU_MODULE_DIR:-}" ]; then
   exit 0
 fi
 
-TOFU_VERSION="1.12.6"
+TOFU_VERSION="1.13.1"
 TOFU_CACHE_DIR="/tmp/np-tofu-bin/${TOFU_VERSION}"
 
 tofu_version_of() {
