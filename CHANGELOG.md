@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+
+### Features
+
+* metrics for the SQL Server instance in the service's metrics view: CPU, connections, free storage, freeable memory, read and write IOPS and latency
+* the requirements module grants the agent role `cloudwatch:GetMetricStatistics` so metrics show
+* the install module subscribes the agent channel to `telemetry` notifications
+
 ## [0.2.1](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.2.0...v0.2.1) (2026-10-02)
 
 

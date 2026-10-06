@@ -11,10 +11,11 @@ cluster_name = ""
 state_bucket_name = ""
 
 # Optional overrides.
-# agent_role_arn             = ""
-# additional_agent_role_arns = []
-# role_name                  = ""
-# policies_name_prefix       = ""
-# iam_create_role            = true
-# iam_resource_tags_json     = {}
-# external_kms_key_arns      = []   # keys the agent may pass as RDS_SQL_SERVER_KMS_KEY_ARN
+# agent_role_arn                       = ""
+# additional_agent_role_arns           = []
+# role_name                            = ""
+# policies_name_prefix                 = ""
+# iam_create_role                      = true
+# attach_metrics_policy_to_agent_roles = true
+# iam_resource_tags_json               = {}
+# external_kms_key_arns                = []   # keys the agent may pass as RDS_SQL_SERVER_KMS_KEY_ARN

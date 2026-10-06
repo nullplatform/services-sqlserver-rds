@@ -101,6 +101,29 @@ sprawl against a hard account limit, needs an `s3:CreateBucket` grant the agent
 should not have, and leaves nowhere to apply a single lifecycle or encryption
 policy.
 
+## Metrics
+
+`rds-sqlserver-server` shows CloudWatch metrics of its RDS instance in the service's metrics view. `rds-sqlserver-db` has none: CloudWatch publishes no per-database metrics.
+
+`metric:list` and `metric:data` notifications run `scripts/aws/list_metrics` and `scripts/aws/fetch_metric` directly from `entrypoint/metric`, without `np service workflow exec` and without assuming the permissions role. `metric:data` makes one AWS call, to CloudWatch: `AWS/RDS` with the dimension `DBInstanceIdentifier` taken from the `db_instance_identifier` attribute, in the region of the `master_secret_arn` attribute, for the requested `start_time`, `end_time` and `period` (rounded up to a multiple of 60 seconds).
+
+| Metric | Statistic | Unit |
+| :---- | :---- | :---- |
+| `CPUUtilization` | Average | percent |
+| `DatabaseConnections` | Maximum | count |
+| `FreeStorageSpace` | Minimum | bytes |
+| `FreeableMemory` | Minimum | bytes |
+| `ReadIOPS` | Average | count |
+| `WriteIOPS` | Average | count |
+| `ReadLatency` | Average | seconds |
+| `WriteLatency` | Average | seconds |
+
+A service whose instance does not exist yet returns an empty series. A CloudWatch error fails the request instead of showing an empty graph.
+
+**Permissions to request.** The agent role itself needs `cloudwatch:GetMetricStatistics` on `*`: metrics run on the agent's credentials, never on the permissions role. `specs/requirements/aws` attaches that policy to `agent_role_arn` and `additional_agent_role_arns`; set `attach_metrics_policy_to_agent_roles = false` if the agent role is managed elsewhere. The `specs/install/aws` module subscribes the agent channel to `service` and `telemetry` notifications; without `telemetry` the service shows no metrics.
+
+The service has no logs: `log:*` notifications run `scripts/aws/read_logs`, which answers with no entries. Telemetry scripts print nothing but their result, since stdout is the response. Workflow overrides do not apply to telemetry.
+
 ## Tests
 
 ```bash
