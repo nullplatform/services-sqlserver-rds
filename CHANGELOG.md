@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.2.1...v0.3.0) (2026-10-06)
+
+
+### Features
+
+* run the worker images as a non-root user ([ef9a9ca](https://github.com/nullplatform/services-sqlserver-rds/commit/ef9a9cafc345f0043f31f4d6a935ec403f0fc1fa))
+* run the worker images as a non-root user ([20762e1](https://github.com/nullplatform/services-sqlserver-rds/commit/20762e14e139e9f18b0ca2d4ea03393cf4f8b545))
+
+
+### Bug Fixes
+
+* hand HOME to the runtime user ([9743c8d](https://github.com/nullplatform/services-sqlserver-rds/commit/9743c8d3fc65c7e7155ddfec431e88c20d0e7844))
+* keep an existing instance's vpc, subnets and region from its state ([dc3c290](https://github.com/nullplatform/services-sqlserver-rds/commit/dc3c290557fde3425c55578b1c1ebc2ee65896ae))
+
 ## [0.2.1](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.2.0...v0.2.1) (2026-10-02)
 
 
