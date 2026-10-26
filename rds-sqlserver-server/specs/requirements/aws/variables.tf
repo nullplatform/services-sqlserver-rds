@@ -43,6 +43,12 @@ variable "iam_create_role" {
   default     = true
 }
 
+variable "attach_metrics_policy_to_agent_roles" {
+  description = "Whether to attach the CloudWatch read policy the service metrics need to agent_role_arn and additional_agent_role_arns. Metrics run on the agent's own credentials, not on the permissions role. Set to false when the agent role is managed elsewhere and already has cloudwatch:GetMetricStatistics."
+  type        = bool
+  default     = true
+}
+
 variable "iam_resource_tags_json" {
   description = "Tags to apply to IAM resources created by this module."
   type        = map(string)
