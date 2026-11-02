@@ -2,7 +2,12 @@
 
 load '../helpers/common'
 
-PINNED="1.13.2"
+# The pin is the Dockerfile's: the one place Renovate bumps. The test below checks
+# that both do_tofu scripts agree with it, so a bump that misses them fails here.
+PINNED="$(sed -n 's/^ARG TOFU_VERSION=//p' "$REPO_ROOT/Dockerfile.rds-sqlserver-db")"
+[ -n "$PINNED" ] || { echo "no ARG TOFU_VERSION in Dockerfile.rds-sqlserver-db" >&2; exit 1; }
+# A version newer than the pin, whatever the pin is: next minor of the same major.
+NEWER="${PINNED%%.*}.$(( $(echo "$PINNED" | cut -d. -f2) + 1 )).0"
 
 setup() {
   setup_mock_bin
@@ -55,10 +60,10 @@ MOCK
 
 @test "a PATH tofu newer than the pin is used as is" {
   setup_no_download
-  fake_tofu_at "$MOCK_BIN/tofu" "1.14.0"
+  fake_tofu_at "$MOCK_BIN/tofu" "$NEWER"
   run "$(script_under_test rds-sqlserver-db)"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Using tofu v1.14.0"* ]]
+  [[ "$output" == *"Using tofu v${NEWER}"* ]]
   run grep -c "^curl " "$MOCK_LOG"
   [ "$output" = "0" ]
 }
@@ -100,10 +105,10 @@ MOCK
 
 @test "a cached binary newer than the pin is accepted" {
   setup_no_download
-  fake_tofu_at "${TOFU_CACHE_ROOT}/${PINNED}/tofu" "1.14.2"
+  fake_tofu_at "${TOFU_CACHE_ROOT}/${PINNED}/tofu" "$NEWER"
   run "$(script_under_test rds-sqlserver-db)"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Using tofu v1.14.2"* ]]
+  [[ "$output" == *"Using tofu v${NEWER}"* ]]
 }
 
 @test "minor versions compare numerically, not lexically" {
