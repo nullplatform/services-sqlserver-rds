@@ -9,6 +9,13 @@
 * the requirements module grants the agent role `cloudwatch:GetMetricStatistics` so metrics show
 * the install module subscribes the agent channel to `telemetry` notifications
 
+## [0.4.2](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.4.1...v0.4.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** bump nullplatform/scopes/worker-bridge from 2.0.6 to 2.0.7 ([#28](https://github.com/nullplatform/services-sqlserver-rds/issues/28)) ([48ec623](https://github.com/nullplatform/services-sqlserver-rds/commit/48ec623f769a6e793efba60bda357ba7afb0457b))
+
 ## [0.4.1](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.4.0...v0.4.1) (2026-10-26)
 
 
