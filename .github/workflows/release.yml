@@ -37,7 +37,7 @@ jobs:
   release:
     uses: nullplatform/actions-nullplatform/.github/workflows/release-publish-oci.yml@v1
     with:
-      image_name: services/rds-sqlserver-server
+      image_name: agent-plugins/services/rds-sqlserver-server
       dockerfile: Dockerfile.rds-sqlserver-server
       existing_tag: ${{ inputs.existing_tag || '' }}
     secrets:
@@ -58,7 +58,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       ECR_REGISTRY: public.ecr.aws/nullplatform
-      IMAGE_NAME: services/${{ matrix.service }}
+      IMAGE_NAME: agent-plugins/services/${{ matrix.service }}
       SERVICE: ${{ matrix.service }}
       DOCKERFILE: ${{ matrix.dockerfile }}
       TAG: ${{ inputs.existing_tag || needs.release.outputs.tag_name }}
