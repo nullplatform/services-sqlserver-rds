@@ -9,6 +9,17 @@
 * the requirements module grants the agent role `cloudwatch:GetMetricStatistics` so metrics show
 * the install module subscribes the agent channel to `telemetry` notifications
 
+## [0.4.3](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.4.2...v0.4.3) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** bump actions/checkout from 4 to 7 ([#23](https://github.com/nullplatform/services-sqlserver-rds/issues/23)) ([20879b4](https://github.com/nullplatform/services-sqlserver-rds/commit/20879b4e1c5c124e6357b875f8d5faac5bb66ef5))
+* **deps:** bump aws-actions/configure-aws-credentials from 4 to 6 ([#24](https://github.com/nullplatform/services-sqlserver-rds/issues/24)) ([d1ba0ef](https://github.com/nullplatform/services-sqlserver-rds/commit/d1ba0efbb14610a666ba608e3305e48e21611350))
+* **deps:** bump docker/setup-buildx-action from 3 to 4 ([#25](https://github.com/nullplatform/services-sqlserver-rds/issues/25)) ([36349ea](https://github.com/nullplatform/services-sqlserver-rds/commit/36349ea19504a600683c3ca7ce466a97c30a2ffd))
+* **deps:** bump docker/setup-qemu-action from 3 to 4 ([#26](https://github.com/nullplatform/services-sqlserver-rds/issues/26)) ([e57cd8f](https://github.com/nullplatform/services-sqlserver-rds/commit/e57cd8fa34f54441e73d2c234a66b0777c53de26))
+* **deps:** update dependency opentofu/opentofu to v1.13.2 ([#29](https://github.com/nullplatform/services-sqlserver-rds/issues/29)) ([1e372c8](https://github.com/nullplatform/services-sqlserver-rds/commit/1e372c8e43e1714d10c66125504321369dba5210))
+
 ## [0.4.2](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.4.1...v0.4.2) (2026-11-02)
 
 
