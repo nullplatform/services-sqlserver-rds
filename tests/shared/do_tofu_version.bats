@@ -2,7 +2,7 @@
 
 load '../helpers/common'
 
-PINNED="1.13.1"
+PINNED="1.13.2"
 
 setup() {
   setup_mock_bin
