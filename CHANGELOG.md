@@ -9,6 +9,13 @@
 * the requirements module grants the agent role `cloudwatch:GetMetricStatistics` so metrics show
 * the install module subscribes the agent channel to `telemetry` notifications
 
+## [0.4.6](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.4.5...v0.4.6) (2026-11-16)
+
+
+### Bug Fixes
+
+* **deps:** update dependency opentofu/opentofu to v1.13.9 ([#37](https://github.com/nullplatform/services-sqlserver-rds/issues/37)) ([887ce83](https://github.com/nullplatform/services-sqlserver-rds/commit/887ce835fa64324c23b212c7b0613eb384df1131))
+
 ## [0.4.5](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.4.4...v0.4.5) (2026-11-03)
 
 
