@@ -30,6 +30,14 @@ validate_identifier() {
 }
 fi
 
+if ! type -t migrator_username_for >/dev/null 2>&1; then
+migrator_username_for() {
+  local name="${1}_mig"
+  validate_identifier "migrations username" "$name"
+  echo "$name"
+}
+fi
+
 if ! type -t validate_password >/dev/null 2>&1; then
 validate_password() {
   local value="$1"

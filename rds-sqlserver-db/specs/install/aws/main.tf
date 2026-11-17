@@ -11,7 +11,7 @@
 locals {
   service_path      = "rds-sqlserver-db"
   available_links   = ["connect"]
-  available_actions = []
+  available_actions = ["run-migrations"]
 }
 
 module "service_definition" {

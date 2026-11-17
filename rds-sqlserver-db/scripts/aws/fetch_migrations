@@ -1,0 +1,36 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib"
+source "$SCRIPT_DIR/github_app"
+source "$SCRIPT_DIR/migrations_lib"
+
+load_migration_parameters
+
+if [ -z "${SERVER_HOSTNAME:-}" ] || [ -z "${DB_NAME:-}" ]; then
+  die "the service has no hostname or database_name: create it successfully before running migrations"
+fi
+
+if [ -z "${MIGRATOR_SECRET_ARN:-}" ]; then
+  die "the service has no migrations user yet: run its update action once to create it, then run migrations again"
+fi
+
+echo "Migrations: ${GITHUB_REPOSITORY}@${MIGRATIONS_REF}, directory ${SCRIPTS_PATH}, mode ${MIGRATIONS_MODE}"
+
+rm -rf "$MIGRATIONS_DIR"
+mkdir -p "$MIGRATIONS_DIR"
+chmod 700 "$MIGRATIONS_DIR"
+
+TOKEN=$(mint_github_token "$GITHUB_REPOSITORY" read)
+
+echo "Cloning ${GITHUB_REPOSITORY} at ${MIGRATIONS_REF}..."
+git_with_token "$TOKEN" clone --quiet --depth 1 --branch "$MIGRATIONS_REF" \
+  "https://github.com/${GITHUB_REPOSITORY}.git" "${MIGRATIONS_DIR}/repo" \
+  || die "could not clone ${GITHUB_REPOSITORY} at '${MIGRATIONS_REF}': check that the tag or branch exists"
+
+if [ ! -d "${MIGRATIONS_DIR}/repo/${SCRIPTS_PATH}" ]; then
+  die "directory ${SCRIPTS_PATH} does not exist in ${GITHUB_REPOSITORY}@${MIGRATIONS_REF}"
+fi
+
+echo "Cloned ${GITHUB_REPOSITORY}@${MIGRATIONS_REF} ($(git -C "${MIGRATIONS_DIR}/repo" rev-parse --short HEAD))."

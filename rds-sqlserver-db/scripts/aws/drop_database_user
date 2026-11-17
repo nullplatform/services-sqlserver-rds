@@ -16,15 +16,18 @@ fi
 
 validate_identifier "database name" "$DB_NAME"
 validate_identifier "database username" "$DB_USERNAME"
+MIGRATOR_USERNAME=$(migrator_username_for "$DB_USERNAME")
 
 fetch_master_credentials "$MASTER_SECRET_ARN"
 
-echo "Dropping user ${DB_USERNAME} from ${DB_NAME} and its server login..."
+for user in "$DB_USERNAME" "$MIGRATOR_USERNAME"; do
+  echo "Dropping user ${user} from ${DB_NAME} and its server login..."
 
-sqlcmd_exec "$DB_NAME" "$SERVICE_PATH/sql/drop_user.sql" \
-  -v DbUser="$DB_USERNAME"
+  sqlcmd_exec "$DB_NAME" "$SERVICE_PATH/sql/drop_user.sql" \
+    -v DbUser="$user"
 
-sqlcmd_exec master "$SERVICE_PATH/sql/drop_login.sql" \
-  -v DbUser="$DB_USERNAME"
+  sqlcmd_exec master "$SERVICE_PATH/sql/drop_login.sql" \
+    -v DbUser="$user"
+done
 
 echo "User cleanup complete. Database ${DB_NAME} preserved."

@@ -1,0 +1,57 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib"
+source "$SCRIPT_DIR/github_app"
+source "$SCRIPT_DIR/migrations_lib"
+
+load_migration_parameters
+require_liquibase
+
+CREDENTIALS=$(aws secretsmanager get-secret-value \
+  --secret-id "$MIGRATOR_SECRET_ARN" \
+  --query 'SecretString' \
+  --output text) || die "could not read the migrations user credentials from ${MIGRATOR_SECRET_ARN}"
+
+MIGRATOR_USER=$(echo "$CREDENTIALS" | jq -r '.username // empty')
+MIGRATOR_PASSWORD=$(echo "$CREDENTIALS" | jq -r '.password // empty')
+
+if [ -z "$MIGRATOR_USER" ] || [ -z "$MIGRATOR_PASSWORD" ]; then
+  die "the migrations user secret ${MIGRATOR_SECRET_ARN} has no username or password"
+fi
+
+JDBC_URL="jdbc:sqlserver://${SERVER_HOSTNAME}:${SERVER_PORT};databaseName=${DB_NAME};encrypt=true;trustServerCertificate=true;loginTimeout=30"
+
+liquibase() {
+  LIQUIBASE_COMMAND_USERNAME="$MIGRATOR_USER" \
+  LIQUIBASE_COMMAND_PASSWORD="$MIGRATOR_PASSWORD" \
+  LIQUIBASE_ANALYTICS_ENABLED=false \
+  LIQUIBASE_SHOW_BANNER=false \
+    "$MIGRATIONS_LIQUIBASE_BIN" \
+      --classpath="$MSSQL_JDBC_JAR" \
+      --search-path="$MIGRATIONS_DIR" \
+      --changelog-file=changelog.json \
+      --url="$JDBC_URL" \
+      "$@"
+}
+
+echo "Validating the changelog against ${DB_NAME} on ${SERVER_HOSTNAME} as ${MIGRATOR_USER}..."
+liquibase validate || die "liquibase validate failed: see the error above"
+
+echo "Changesets not yet applied:"
+liquibase status --verbose || die "liquibase status failed: see the error above"
+
+echo "SQL that the update runs:"
+liquibase update-sql --output-file="${MIGRATIONS_DIR}/preview.sql" \
+  || die "liquibase update-sql failed: see the error above"
+cat "${MIGRATIONS_DIR}/preview.sql"
+
+if [ "$MIGRATIONS_MODE" = "apply" ]; then
+  echo "Applying the changesets..."
+  liquibase update \
+    || die "liquibase update failed: changesets that ran before the failure are recorded in DATABASECHANGELOG and are skipped on retry; nothing was moved to history"
+  echo "Changesets applied."
+else
+  echo "Preview mode: nothing was applied."
+fi
