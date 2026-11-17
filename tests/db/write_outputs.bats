@@ -125,3 +125,24 @@ MOCK
   [ ! -f "$BODY_PATH" ]
   [ ! -d "$(dirname "$BODY_PATH")" ]
 }
+
+@test "the migrations secret arn is written to the service attributes when the module outputs it" {
+  cat > "$MOCK_BIN/tofu" <<MOCK
+#!/usr/bin/env bash
+cat <<'JSON'
+{
+  "hostname":            {"value": "sql.example.rds.amazonaws.com"},
+  "port":                {"value": 1433},
+  "db_username":         {"value": "app_42"},
+  "db_password":         {"value": "$APP_PASSWORD"},
+  "database_name":       {"value": "app_42"},
+  "migrator_secret_arn": {"value": "arn:migrator"}
+}
+JSON
+MOCK
+  chmod +x "$MOCK_BIN/tofu"
+  run "$DB_SERVICE_PATH/scripts/aws/write_service_outputs"
+  [ "$status" -eq 0 ]
+  run jq -r '.attributes.migrator_secret_arn' "$BATS_TEST_TMPDIR/body.json"
+  [ "$output" = "arn:migrator" ]
+}

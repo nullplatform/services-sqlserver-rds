@@ -68,7 +68,11 @@ in `nullplatform/rds-sqlserver/<service slug>-<service id>/migrator`. Services
 created before this action get the user on their next `update`; until then the
 action asks for one.
 
-The repository follows the `<sigla>-databases` layout:
+The repository must be the application's own `<org>/<sigla>-databases`, where
+the sigla is the namespace slug up to its first `-` (namespace `abcd-payments`
+→ `abcd-databases`). Any other repository is refused before GitHub is called,
+so one application cannot read or move another's scripts. It follows this
+layout:
 
 ```
 <environment>/<database>/NN_description.sql   pending
@@ -77,7 +81,7 @@ The repository follows the `<sigla>-databases` layout:
 
 | Parameter | Meaning |
 |---|---|
-| `repository_url` | `https://github.com/<org>/<repo>` |
+| `repository_url` | `https://github.com/<org>/<sigla>-databases` |
 | `ref` | tag or branch to read the scripts from |
 | `environment_directory` | e.g. `dev`, `qas`, `prd` |
 | `database_directory` | defaults to the database name |

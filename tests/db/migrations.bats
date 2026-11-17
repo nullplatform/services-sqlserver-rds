@@ -283,11 +283,55 @@ setup() {
   [[ "$output" == *"03_tricky.sql: DROP"* ]] || false
 }
 
-@test "commands quoted inside string literals are not flagged" {
+@test "dynamic SQL in a string literal is still checked" {
   prepare_fetched_repo
-  printf "INSERT INTO audit (msg) VALUES ('nobody may DROP this');\n" > "$MIGRATIONS_DIR/repo/qas/app_42/03_literal.sql"
+  printf "EXEC('DROP TABLE t1');\n" > "$MIGRATIONS_DIR/repo/qas/app_42/03_dynamic.sql"
+  run_step prepare_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"03_dynamic.sql: DROP"* ]] || false
+}
+
+@test "a quote inside a bracketed or double-quoted identifier does not open a string" {
+  prepare_fetched_repo
+  printf 'SELECT 1 AS [it'"'"'s], 2 AS "o'"'"'brien"; -- DROP TABLE t1;\nSELECT 3;\n' > "$MIGRATIONS_DIR/repo/qas/app_42/03_ident.sql"
   run_step prepare_migrations
   [ "$status" -eq 0 ]
+
+  printf 'SELECT 1 AS [it'"'"'s]; DROP TABLE t1;\n' > "$MIGRATIONS_DIR/repo/qas/app_42/03_ident.sql"
+  run_step prepare_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"03_ident.sql: DROP"* ]] || false
+}
+
+@test "the repository must be the application's sigla-databases repository" {
+  set_migration_parameters '{"repository_url":"https://github.com/My-Org/xyz-databases","ref":"v1.0.0","environment_directory":"qas","mode":"apply"}'
+  run_step fetch_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repository My-Org/xyz-databases does not belong to this application: its sigla is ABC, so migrations must come from <org>/abc-databases"* ]] || false
+  run grep -c "^curl " "$MOCK_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "the sigla repository is matched case-insensitively and namespace.slug wins over tags.namespace" {
+  CONTEXT=$(jq -nc '{service: {id: "svc-1"}, namespace: {slug: "Abc-core"}, tags: {namespace: "xyz-other"}, parameters: {repository_url: "https://github.com/My-Org/ABC-Databases", ref: "v1.0.0", environment_directory: "qas", mode: "preview"}}')
+  export CONTEXT
+  run_step fetch_migrations
+  [ "$status" -eq 0 ]
+
+  CONTEXT=$(jq -c '.parameters.repository_url = "https://github.com/My-Org/xyz-databases"' <<< "$CONTEXT")
+  run_step fetch_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"its sigla is ABC"* ]] || false
+}
+
+@test "an application without a namespace cannot run migrations" {
+  CONTEXT=$(jq -nc '{service: {id: "svc-1"}, tags: {}, parameters: {repository_url: "https://github.com/My-Org/abc-databases", ref: "v1.0.0", environment_directory: "qas", mode: "apply"}}')
+  export CONTEXT
+  run_step fetch_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot resolve the application's sigla"* ]] || false
+  run grep -c "^curl " "$MOCK_LOG"
+  [ "$output" = "0" ]
 }
 
 @test "a UTF-8 BOM is removed from the staged copy, not from the repository" {
@@ -464,4 +508,157 @@ setup() {
   [ "$status" -eq 0 ]
   [ "${#output}" -eq 64 ]
   [[ "$output" == *_mig ]]
+}
+
+make_liquibase_mise_mock() {
+  MISE_INSTALLS="$BATS_TEST_TMPDIR/mise-installs"
+  export MISE_INSTALLS
+  cat > "$MOCK_BIN/mise" <<MOCK
+#!/usr/bin/env bash
+echo "mise \$*" >> "$MOCK_LOG"
+dir="$MISE_INSTALLS/\${2//[:\/@]/-}"
+case "\$1" in
+  install)
+    mkdir -p "\$dir/bin"
+    printf '#!/usr/bin/env bash\n' > "\$dir/bin/java"
+    printf '#!/usr/bin/env bash\n' > "\$dir/bin/liquibase"
+    chmod +x "\$dir/bin/java" "\$dir/bin/liquibase"
+    ;;
+  where)
+    [ -d "\$dir" ] || { echo "mise ERROR \$2 is not installed" >&2; exit 1; }
+    echo "\$dir"
+    ;;
+  bin-paths)
+    [ -d "\$dir" ] || { echo "mise ERROR \$2 is not installed" >&2; exit 1; }
+    echo "\$dir/bin"
+    ;;
+  *)
+    echo "mise ERROR unexpected subcommand \$1" >&2
+    exit 1
+    ;;
+esac
+MOCK
+  chmod +x "$MOCK_BIN/mise"
+}
+
+@test "repository urls with .git, a trailing slash or the ssh form resolve to org/repo" {
+  for url in "https://github.com/My-Org/abc-databases.git" "https://github.com/My-Org/abc-databases/" "git@github.com:My-Org/abc-databases.git"; do
+    run bash -c "source '$DB_SERVICE_PATH/scripts/aws/lib'; source '$DB_SERVICE_PATH/scripts/aws/migrations_lib'; github_repository_of '$url'"
+    [ "$status" -eq 0 ]
+    [ "$output" = "My-Org/abc-databases" ]
+  done
+}
+
+@test "a database_directory parameter replaces the database name as the scripts directory" {
+  mkdir -p "$FIXTURE_REPO/qas/custom_dir"
+  printf 'SELECT 1;\n' > "$FIXTURE_REPO/qas/custom_dir/01_custom.sql"
+  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","database_directory":"custom_dir","mode":"preview"}'
+  run_step fetch_migrations
+  [ "$status" -eq 0 ]
+  run_step prepare_migrations
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUTPUT_DIR/migrations/pending.txt")" = "01_custom.sql" ]
+}
+
+@test "preview results carry an empty history commit" {
+  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
+  run_step fetch_migrations
+  [ "$status" -eq 0 ]
+  run_step prepare_migrations
+  [ "$status" -eq 0 ]
+  run_step write_migration_results
+  [ "$status" -eq 0 ]
+  run grep -c 'np service action update --results {"mode":"preview","ref":"v1.0.0","scripts":\["01_create_t1.sql","02_alter_t1.sql"\],"history_commit":""}$' "$MOCK_LOG"
+  [ "$output" = "1" ]
+}
+
+@test "require_liquibase installs the glibc java and the pinned liquibase with mise" {
+  make_liquibase_mise_mock
+  run bash -c "
+    source '$DB_SERVICE_PATH/scripts/aws/lib'
+    source '$DB_SERVICE_PATH/scripts/aws/migrations_lib'
+    is_musl() { return 1; }
+    require_mssql_jdbc() { echo '$BATS_TEST_TMPDIR/mssql.jar'; }
+    require_liquibase
+    echo \"bin=\$MIGRATIONS_LIQUIBASE_BIN java=\$JAVA_HOME\"
+  "
+  [ "$status" -eq 0 ]
+  grep -q "^mise install java@zulu-21.54.109.0$" "$MOCK_LOG"
+  grep -q "^mise install liquibase@5.0.2$" "$MOCK_LOG"
+  [[ "$output" == *"bin=$MISE_INSTALLS/liquibase-5.0.2/bin/liquibase"* ]] || false
+}
+
+@test "require_liquibase picks the musl java build on musl hosts" {
+  make_liquibase_mise_mock
+  run bash -c "
+    source '$DB_SERVICE_PATH/scripts/aws/lib'
+    source '$DB_SERVICE_PATH/scripts/aws/migrations_lib'
+    is_musl() { return 0; }
+    require_mssql_jdbc() { echo '$BATS_TEST_TMPDIR/mssql.jar'; }
+    require_liquibase
+  "
+  [ "$status" -eq 0 ]
+  grep -q "^mise install java@zulu-musl-21.54.109.0$" "$MOCK_LOG"
+}
+
+@test "require_liquibase fails naming the tool when mise is missing" {
+  run bash -c "
+    PATH='/usr/bin:/bin'
+    source '$DB_SERVICE_PATH/scripts/aws/lib'
+    source '$DB_SERVICE_PATH/scripts/aws/migrations_lib'
+    require_liquibase
+  "
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"mise is not available to install java@"* ]] || false
+}
+
+@test "a jdbc driver that fails its pinned sha256 is rejected and not cached" {
+  cat > "$MOCK_BIN/curl" <<MOCK
+#!/usr/bin/env bash
+echo "curl \$*" >> "$MOCK_LOG"
+out=""; prev=""
+for arg in "\$@"; do
+  [ "\$prev" = "-o" ] && out="\$arg"
+  prev="\$arg"
+done
+echo "tampered" > "\$out"
+MOCK
+  chmod +x "$MOCK_BIN/curl"
+  export XDG_CACHE_HOME="$BATS_TEST_TMPDIR/cache"
+  run bash -c "
+    source '$DB_SERVICE_PATH/scripts/aws/lib'
+    source '$DB_SERVICE_PATH/scripts/aws/migrations_lib'
+    require_mssql_jdbc
+  "
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"does not match its pinned sha256"* ]] || false
+  [ -z "$(ls "$XDG_CACHE_HOME/np-rds-sqlserver")" ]
+}
+
+@test "a failed jdbc driver download is reported" {
+  cat > "$MOCK_BIN/curl" <<MOCK
+#!/usr/bin/env bash
+exit 22
+MOCK
+  chmod +x "$MOCK_BIN/curl"
+  export XDG_CACHE_HOME="$BATS_TEST_TMPDIR/cache"
+  run bash -c "
+    source '$DB_SERVICE_PATH/scripts/aws/lib'
+    source '$DB_SERVICE_PATH/scripts/aws/migrations_lib'
+    require_mssql_jdbc
+  "
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"could not download mssql-jdbc"* ]] || false
+}
+
+@test "a failed validate stops the run before status and update" {
+  echo validate > "$BATS_TEST_TMPDIR/liquibase-fail-on"
+  prepare_fetched_repo
+  run_step prepare_migrations
+  [ "$status" -eq 0 ]
+  run_step_with_mocked_liquibase run_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"liquibase validate failed"* ]] || false
+  [ "$(calls_matching '^liquibase .* update')" -eq 0 ]
+  [ "$(calls_matching '^liquibase .* status')" -eq 0 ]
 }

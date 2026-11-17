@@ -70,6 +70,39 @@ validate_directory_name() {
 }
 fi
 
+if ! type -t resolve_sigla >/dev/null 2>&1; then
+resolve_sigla() {
+  local slug sigla
+
+  slug=$(jq -r '[.namespace.slug?, .tags.namespace?] | map(select(type == "string" and . != "")) | first // empty' <<< "$1")
+
+  if [ -z "$slug" ]; then
+    die "cannot resolve the application's sigla: the context has neither namespace.slug nor tags.namespace"
+  fi
+
+  sigla=$(printf '%s' "${slug%%-*}" | tr '[:lower:]' '[:upper:]')
+
+  if [[ ! "$sigla" =~ ^[A-Z0-9]([A-Z0-9_.]{0,61}[A-Z0-9])?$ ]]; then
+    die "cannot use '${sigla}' (from namespace '${slug}') as the application's sigla"
+  fi
+
+  printf '%s' "$sigla"
+}
+fi
+
+if ! type -t require_sigla_repository >/dev/null 2>&1; then
+require_sigla_repository() {
+  local repository="$1" sigla="$2" expected actual
+
+  expected=$(printf '%s-databases' "$sigla" | tr '[:upper:]' '[:lower:]')
+  actual=$(printf '%s' "${repository#*/}" | tr '[:upper:]' '[:lower:]')
+
+  if [ "$actual" != "$expected" ]; then
+    die "repository ${repository} does not belong to this application: its sigla is ${sigla}, so migrations must come from <org>/${expected}"
+  fi
+}
+fi
+
 if ! type -t load_migration_parameters >/dev/null 2>&1; then
 load_migration_parameters() {
   REPOSITORY_URL=$(migration_parameter repository_url)
@@ -80,6 +113,8 @@ load_migration_parameters() {
   MIGRATIONS_MODE=$(migration_parameter mode)
 
   GITHUB_REPOSITORY=$(github_repository_of "$REPOSITORY_URL")
+  SIGLA=$(resolve_sigla "$CONTEXT")
+  require_sigla_repository "$GITHUB_REPOSITORY" "$SIGLA"
 
   validate_git_ref "ref" "$MIGRATIONS_REF"
 
@@ -104,7 +139,7 @@ load_migration_parameters() {
   SCRIPTS_PATH="${ENVIRONMENT_DIRECTORY}/${DATABASE_DIRECTORY}"
 
   export REPOSITORY_URL MIGRATIONS_REF ENVIRONMENT_DIRECTORY DATABASE_DIRECTORY HISTORY_BRANCH
-  export MIGRATIONS_MODE GITHUB_REPOSITORY MIGRATIONS_DIR SCRIPTS_PATH
+  export MIGRATIONS_MODE GITHUB_REPOSITORY MIGRATIONS_DIR SCRIPTS_PATH SIGLA
 }
 fi
 
@@ -123,15 +158,18 @@ strip_sql_comments() {
           if (pair == "*/") { in_block = 0; out = out " "; i += 2 } else { i++ }
           continue
         }
-        if (in_string) {
-          if (pair == quote quote) { i += 2; continue }
-          if (c == quote) { in_string = 0; out = out quote }
+        if (closer != "") {
+          if (pair == closer closer) { out = out pair; i += 2; continue }
+          if (c == closer) { closer = "" }
+          out = out c
           i++
           continue
         }
         if (pair == "--") { break }
         if (pair == "/*") { in_block = 1; i += 2; continue }
-        if (c == quote) { in_string = 1; out = out quote; i++; continue }
+        if (c == quote) { closer = quote }
+        else if (c == "[") { closer = "]" }
+        else if (c == "\"") { closer = "\"" }
         out = out c
         i++
       }
