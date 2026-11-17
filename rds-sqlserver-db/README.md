@@ -93,7 +93,17 @@ in `dev`, so re-running a tag skips what it already applied. The move to
 fails, the action lists the scripts to move by hand.
 
 `GRANT CONNECT` is rejected in every environment; `DROP`, `TRUNCATE` and
-`SELECT *` everywhere except `dev`.
+`SELECT *` everywhere except `dev`. This is a guardrail against mistakes, not a
+security boundary: dynamic SQL gets past it, and `db_owner` can do all of it.
+
+`apply` checks that the App can write to the repository before it touches the
+database. Liquibase runs with an empty environment, so `${...}` in a script
+cannot expand the agent's credentials. Repositories with symbolic links are
+rejected. The generated SQL is printed in the action log but never stored in
+its results.
+
+A run killed mid-update leaves `DATABASECHANGELOGLOCK` held, and the next run
+waits for it. Clear it with `liquibase release-locks` as the migrations user.
 
 The repository is read and written with the agent's GitHub App
 (`NP_GITHUB_APPS`), which needs **Contents: Read and write** on it. Java 21,

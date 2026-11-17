@@ -30,9 +30,20 @@ validate_identifier() {
 }
 fi
 
+if ! type -t require_mise_tool >/dev/null 2>&1; then
+require_mise_tool() {
+  local tool="$1"
+
+  command -v mise >/dev/null 2>&1 || die "mise is not available to install ${tool}"
+
+  echo "Installing ${tool} with mise..." >&2
+  mise install "$tool" >&2 || die "could not install ${tool} with mise"
+}
+fi
+
 if ! type -t migrator_username_for >/dev/null 2>&1; then
 migrator_username_for() {
-  local name="${1}_mig"
+  local name="${1:0:60}_mig"
   validate_identifier "migrations username" "$name"
   echo "$name"
 }

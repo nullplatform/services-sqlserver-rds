@@ -104,6 +104,7 @@ case "\$method \$url" in
     ;;
   "POST https://api.github.com/app/installations/"*"/access_tokens")
     status="\${CURL_TOKEN_STATUS:-201}"
+    case "\$body" in *'"contents":"write"'*) status="\${CURL_WRITE_TOKEN_STATUS:-\$status}" ;; esac
     [ "\$status" = "201" ] && printf '{"token": "$TEST_TOKEN"}\n%s' "\$status" || printf '{"message": "The permissions requested are not granted to this installation."}\n%s' "\$status"
     ;;
   "GET https://api.github.com/repos/"*)
@@ -162,6 +163,10 @@ case "\$sub" in
       case "\$arg" in -*) ;; *) rm -f "\$dir/\$arg" ;; esac
     done
     ;;
+  diff)
+    [ "\${GIT_NOTHING_STAGED:-0}" = "1" ] && exit 0
+    exit 1
+    ;;
   commit) ;;
   push)
     left=\$(cat "$PUSH_FAILURES_FILE")
@@ -198,6 +203,7 @@ make_liquibase_mock() {
   cat > "$MOCK_BIN/liquibase" <<MOCK
 #!/usr/bin/env bash
 echo "liquibase \$*" >> "$MOCK_LOG"
+echo "liquibase-env aws_secret=\${AWS_SECRET_ACCESS_KEY:-unset} github_apps=\${NP_GITHUB_APPS:-unset} java_home=\${JAVA_HOME:-unset}" >> "$MOCK_LOG"
 if [ -z "\${LIQUIBASE_COMMAND_PASSWORD:-}" ] || [ -z "\${LIQUIBASE_COMMAND_USERNAME:-}" ]; then
   echo "liquibase: no credentials in environment" >&2
   exit 1
@@ -213,7 +219,10 @@ for arg in "\$@"; do
   esac
 done
 [ -f "\$search/\$changelog" ] || { echo "liquibase: changelog \$search/\$changelog not found" >&2; exit 1; }
-[ "\$command" = "\${LIQUIBASE_FAIL_ON:-}" ] && { echo "liquibase: \$command failed" >&2; exit 1; }
+if [ -f "$BATS_TEST_TMPDIR/liquibase-fail-on" ] && [ "\$command" = "\$(cat "$BATS_TEST_TMPDIR/liquibase-fail-on")" ]; then
+  echo "liquibase: \$command failed" >&2
+  exit 1
+fi
 [ -n "\$output_file" ] && echo "CREATE TABLE t1 (id INT);" > "\$output_file"
 exit 0
 MOCK
@@ -232,4 +241,5 @@ prepare_fetched_repo() {
   export MIGRATIONS_DIR="$OUTPUT_DIR/migrations"
   mkdir -p "$MIGRATIONS_DIR/repo"
   cp -R "$FIXTURE_REPO/." "$MIGRATIONS_DIR/repo/"
+  echo "${1:-master}" > "$MIGRATIONS_DIR/history_branch"
 }

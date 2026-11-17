@@ -29,6 +29,20 @@ git_with_token "$TOKEN" clone --quiet --depth 1 --branch "$MIGRATIONS_REF" \
   "https://github.com/${GITHUB_REPOSITORY}.git" "${MIGRATIONS_DIR}/repo" \
   || die "could not clone ${GITHUB_REPOSITORY} at '${MIGRATIONS_REF}': check that the tag or branch exists"
 
+reject_symlinks "${MIGRATIONS_DIR}/repo" "${GITHUB_REPOSITORY}@${MIGRATIONS_REF}"
+
+if [ "$MIGRATIONS_MODE" = "apply" ]; then
+  echo "Checking that executed scripts can be moved to history before touching the database..."
+  WRITE_TOKEN=$(mint_github_token "$GITHUB_REPOSITORY" write)
+  HISTORY_TARGET="$HISTORY_BRANCH"
+  if [ -z "$HISTORY_TARGET" ]; then
+    HISTORY_TARGET=$(github_default_branch "$GITHUB_REPOSITORY" "$WRITE_TOKEN")
+  fi
+  validate_git_ref "history branch" "$HISTORY_TARGET"
+  echo "$HISTORY_TARGET" > "${MIGRATIONS_DIR}/history_branch"
+  echo "Executed scripts will be moved to history on ${HISTORY_TARGET}."
+fi
+
 if [ ! -d "${MIGRATIONS_DIR}/repo/${SCRIPTS_PATH}" ]; then
   die "directory ${SCRIPTS_PATH} does not exist in ${GITHUB_REPOSITORY}@${MIGRATIONS_REF}"
 fi

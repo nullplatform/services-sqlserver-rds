@@ -11,38 +11,12 @@ require_step() {
     return 0
   fi
 
-  command -v mise >/dev/null 2>&1 \
-    || die "step not found in PATH and mise is not available to install it"
-
-  echo "Installing step v${STEP_VERSION} with mise..." >&2
-  mise install "$tool" >&2 || die "could not install step v${STEP_VERSION} with mise"
-
-  bin_dir=$(mise bin-paths "$tool") || die "mise installed step but did not report its bin path"
+  require_mise_tool "$tool"
+  bin_dir=$(mise bin-paths "$tool") || die "mise installed ${tool} but did not report its bin path"
   export PATH="${bin_dir}:$PATH"
 
   command -v step >/dev/null 2>&1 \
     || die "step was installed with mise but is still not in PATH"
-}
-fi
-
-if ! type -t github_repository_of >/dev/null 2>&1; then
-github_repository_of() {
-  local url="$1" path
-
-  case "$url" in
-    https://github.com/*) path="${url#https://github.com/}" ;;
-    git@github.com:*)     path="${url#git@github.com:}" ;;
-    *) die "repository_url '${url}' is not a github.com repository (expected https://github.com/<org>/<repo>)" ;;
-  esac
-
-  path="${path%/}"
-  path="${path%.git}"
-
-  if ! printf '%s' "$path" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
-    die "repository_url '${url}' is not a github.com repository (expected https://github.com/<org>/<repo>)"
-  fi
-
-  echo "$path"
 }
 fi
 
@@ -213,6 +187,19 @@ mint_github_token() (
 
   echo "$token"
 )
+fi
+
+if ! type -t github_default_branch >/dev/null 2>&1; then
+github_default_branch() {
+  local repository="$1" token="$2" response
+
+  response=$(github_api GET "/repos/${repository}" "$token") \
+    || die "could not reach the GitHub API to read ${repository}"
+  if [ "$(github_api_status "$response")" != "200" ]; then
+    die "GitHub refused to read ${repository}: $(github_api_message "$response")"
+  fi
+  github_api_body "$response" | jq -r '.default_branch // empty'
+}
 fi
 
 if ! type -t git_with_token >/dev/null 2>&1; then
