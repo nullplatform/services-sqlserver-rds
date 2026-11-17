@@ -17,11 +17,64 @@ setup() {
 }
 
 @test "the GitHub App is matched by org case-insensitively" {
-  set_migration_parameters '{"repository_url":"git@github.com:my-org/abc-databases.git","ref":"v1.0.0","environment_directory":"qas","mode":"apply"}'
+  set_migration_parameters '{"repository_url":"git@github.com:my-org/abc-databases.git","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
   run_step fetch_migrations
   [ "$status" -eq 0 ]
   run grep -c "step crypto jwt sign --key .* --iss 123 " "$MOCK_LOG"
   [ "$output" = "1" ]
+}
+
+@test "preview only ever asks GitHub for a read token" {
+  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
+  run_step fetch_migrations
+  [ "$status" -eq 0 ]
+  run grep -c '"contents":"write"' "$MOCK_LOG"
+  [ "$output" = "0" ]
+  [ ! -f "$OUTPUT_DIR/migrations/history_branch" ]
+}
+
+@test "apply checks the write token and resolves the history branch before touching the database" {
+  run_step fetch_migrations
+  [ "$status" -eq 0 ]
+  run grep -c '^curl-request POST .*"permissions":{"contents":"write"}' "$MOCK_LOG"
+  [ "$output" = "1" ]
+  run grep -c "curl-request GET https://api.github.com/repos/My-Org/abc-databases " "$MOCK_LOG"
+  [ "$output" = "1" ]
+  run cat "$OUTPUT_DIR/migrations/history_branch"
+  [ "$output" = "master" ]
+}
+
+@test "apply stops before the database when the App cannot write to the repository" {
+  export CURL_WRITE_TOKEN_STATUS=422
+  run_step fetch_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GitHub refused a contents:write token for My-Org/abc-databases: The permissions requested are not granted to this installation"* ]] || false
+  run grep -c "^git clone" "$MOCK_LOG"
+  [ "$output" = "1" ]
+}
+
+@test "history_branch overrides the default branch without asking GitHub for it" {
+  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"apply","history_branch":"develop"}'
+  run_step fetch_migrations
+  [ "$status" -eq 0 ]
+  run grep -c "curl-request GET https://api.github.com/repos/My-Org/abc-databases " "$MOCK_LOG"
+  [ "$output" = "0" ]
+  run cat "$OUTPUT_DIR/migrations/history_branch"
+  [ "$output" = "develop" ]
+}
+
+@test "a repository containing symbolic links is rejected before any script is read" {
+  ln -s /etc/hosts "$FIXTURE_REPO/qas/app_42/03_link.sql"
+  run_step fetch_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"contains symbolic links, which are not allowed: qas/app_42/03_link.sql"* ]] || false
+}
+
+@test "a symlinked directory is rejected too" {
+  ln -s /tmp "$FIXTURE_REPO/qas/linked"
+  run_step fetch_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"qas/linked"* ]] || false
 }
 
 @test "neither the token nor the JWT ever appears on a command line" {
@@ -34,7 +87,9 @@ setup() {
   run grep -c "^git .*$TEST_TOKEN.* auth=" "$MOCK_LOG"
   [ "$output" = "0" ]
   run grep -c "curl-stdin-auth $TEST_JWT" "$MOCK_LOG"
-  [ "$output" = "2" ]
+  [ "$output" = "4" ]
+  run grep -c "curl-stdin-auth $TEST_TOKEN" "$MOCK_LOG"
+  [ "$output" = "1" ]
 }
 
 @test "an agent without GitHub Apps fails before calling GitHub" {
@@ -64,6 +119,7 @@ setup() {
 }
 
 @test "a configured installation id skips the installation lookup" {
+  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
   export NP_GITHUB_APPS="org=my-org,app-id=123,installation-id=999,private-key=${KEY_FILE}"
   run_step fetch_migrations
   [ "$status" -eq 0 ]
@@ -74,6 +130,7 @@ setup() {
 }
 
 @test "a key held in SSM is read with the agent's own credentials, not the service role" {
+  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
   export NP_GITHUB_APPS="org=my-org,app-id=123,private-key-ssm-parameter=/np/gh/key"
   run_step fetch_migrations
   [ "$status" -eq 0 ]
@@ -117,6 +174,11 @@ setup() {
   [[ "$output" == *"environment_directory '../etc' must be a single directory name"* ]] || false
 
   set_migration_parameters '{"repository_url":"https://gitlab.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"apply"}'
+  run_step fetch_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"is not a github.com repository"* ]] || false
+
+  set_migration_parameters '{"repository_url":"https://github.com/My-Org/..","ref":"v1.0.0","environment_directory":"qas","mode":"apply"}'
   run_step fetch_migrations
   [ "$status" -ne 0 ]
   [[ "$output" == *"is not a github.com repository"* ]] || false
@@ -213,6 +275,21 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "a comment marker inside a string literal does not hide what follows" {
+  prepare_fetched_repo
+  printf "SELECT 'a--b' AS x; DROP TABLE t1;\nSELECT 'it''s /* fine' AS y;\n" > "$MIGRATIONS_DIR/repo/qas/app_42/03_tricky.sql"
+  run_step prepare_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"03_tricky.sql: DROP"* ]] || false
+}
+
+@test "commands quoted inside string literals are not flagged" {
+  prepare_fetched_repo
+  printf "INSERT INTO audit (msg) VALUES ('nobody may DROP this');\n" > "$MIGRATIONS_DIR/repo/qas/app_42/03_literal.sql"
+  run_step prepare_migrations
+  [ "$status" -eq 0 ]
+}
+
 @test "a UTF-8 BOM is removed from the staged copy, not from the repository" {
   prepare_fetched_repo
   printf '\357\273\277CREATE TABLE b (id INT);\n' > "$MIGRATIONS_DIR/repo/qas/app_42/03_bom.sql"
@@ -252,8 +329,17 @@ setup() {
   [ "$output" = "0" ]
 }
 
+@test "liquibase never sees the agent's credentials, so scripts cannot expand them" {
+  prepare_fetched_repo
+  run_step prepare_migrations
+  run_step_with_mocked_liquibase run_migrations
+  [ "$status" -eq 0 ]
+  run grep -c "^liquibase-env aws_secret=unset github_apps=unset java_home=$BATS_TEST_TMPDIR/java$" "$MOCK_LOG"
+  [ "$output" = "4" ]
+}
+
 @test "a failed update says what was recorded and that nothing moved to history" {
-  export LIQUIBASE_FAIL_ON="update"
+  echo "update" > "$BATS_TEST_TMPDIR/liquibase-fail-on"
   prepare_fetched_repo
   run_step prepare_migrations
   run_step_with_mocked_liquibase run_migrations
@@ -291,9 +377,8 @@ setup() {
   [ "$output" = "0123456789abcdef0123456789abcdef01234567" ]
 }
 
-@test "history_branch overrides the default branch" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"apply","history_branch":"develop"}'
-  prepare_fetched_repo
+@test "the move pushes to the history branch resolved before the update" {
+  prepare_fetched_repo develop
   run_step prepare_migrations
   run_step move_migrations_to_history
   [ "$status" -eq 0 ]
@@ -301,6 +386,29 @@ setup() {
   [ "$output" = "0" ]
   run grep -c "push --quiet origin HEAD:refs/heads/develop " "$MOCK_LOG"
   [ "$output" = "1" ]
+}
+
+@test "scripts already in history count as moved instead of failing the retry" {
+  export GIT_NOTHING_STAGED=1
+  prepare_fetched_repo
+  run_step prepare_migrations
+  run_step move_migrations_to_history
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already in history on master"* ]] || false
+  run grep -cE "^git .*(commit|push) " "$MOCK_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "a symbolic link on the history branch stops the move" {
+  ln -s /tmp "$FIXTURE_REPO/qas/app_42/history/linked"
+  prepare_fetched_repo
+  rm "$MIGRATIONS_DIR/repo/qas/app_42/history/linked"
+  run_step prepare_migrations
+  run_step move_migrations_to_history
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"My-Org/abc-databases@master contains symbolic links"* ]] || false
+  run grep -c "push --quiet" "$MOCK_LOG"
+  [ "$output" = "0" ]
 }
 
 @test "a rejected push is retried from a fresh clone" {
@@ -322,28 +430,38 @@ setup() {
   run_step move_migrations_to_history
   [ "$status" -ne 0 ]
   [[ "$output" == *"  - 01_create_t1.sql"* ]] || false
-  [[ "$output" == *"move them by hand before the next run"* ]] || false
+  [[ "$output" == *"move them to history by hand before the next run"* ]] || false
   run grep -c "push --quiet" "$MOCK_LOG"
   [ "$output" = "3" ]
 }
 
-@test "an App without write access fails the move with GitHub's reason" {
-  export CURL_TOKEN_STATUS=422
+@test "losing write access after the update says the scripts ran and are still pending" {
+  export CURL_WRITE_TOKEN_STATUS=422
   prepare_fetched_repo
   run_step prepare_migrations
   run_step move_migrations_to_history
   [ "$status" -ne 0 ]
-  [[ "$output" == *"GitHub refused a contents:write token for My-Org/abc-databases: The permissions requested are not granted to this installation"* ]] || false
+  [[ "$output" == *"GitHub refused a contents:write token"* ]] || false
+  [[ "$output" == *"ran on app_42 but are still pending in qas/app_42"* ]] || false
+  [[ "$output" == *"  - 02_alter_t1.sql"* ]] || false
 }
 
-@test "results report the mode, ref, scripts and history commit, then clean the work dir" {
+@test "results report the mode, ref, scripts and history commit, never the SQL, then clean the work dir" {
   prepare_fetched_repo
   run_step prepare_migrations
   echo "0123456789abcdef" > "$MIGRATIONS_DIR/history_commit"
-  echo "CREATE TABLE t1 (id INT);" > "$MIGRATIONS_DIR/preview.sql"
+  echo "CREATE LOGIN x WITH PASSWORD = 'secret';" > "$MIGRATIONS_DIR/preview.sql"
   run_step write_migration_results
   [ "$status" -eq 0 ]
-  run grep -c 'np service action update --results {"mode":"apply","ref":"v1.0.0","scripts":\["01_create_t1.sql","02_alter_t1.sql"\],"history_commit":"0123456789abcdef","preview_sql":"CREATE TABLE t1 (id INT);"}' "$MOCK_LOG"
+  run grep -c 'np service action update --results {"mode":"apply","ref":"v1.0.0","scripts":\["01_create_t1.sql","02_alter_t1.sql"\],"history_commit":"0123456789abcdef"}$' "$MOCK_LOG"
   [ "$output" = "1" ]
   [ ! -d "$MIGRATIONS_DIR" ]
+}
+
+@test "a long app user still yields a valid migrations user, so delete never blocks on it" {
+  long_user="a$(printf 'b%.0s' $(seq 1 63))"
+  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/lib'; migrator_username_for '$long_user'"
+  [ "$status" -eq 0 ]
+  [ "${#output}" -eq 64 ]
+  [[ "$output" == *_mig ]]
 }

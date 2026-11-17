@@ -3,7 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib"
-source "$SCRIPT_DIR/github_app"
 source "$SCRIPT_DIR/migrations_lib"
 
 load_migration_parameters
@@ -24,10 +23,14 @@ fi
 JDBC_URL="jdbc:sqlserver://${SERVER_HOSTNAME}:${SERVER_PORT};databaseName=${DB_NAME};encrypt=true;trustServerCertificate=true;loginTimeout=30"
 
 liquibase() {
-  LIQUIBASE_COMMAND_USERNAME="$MIGRATOR_USER" \
-  LIQUIBASE_COMMAND_PASSWORD="$MIGRATOR_PASSWORD" \
-  LIQUIBASE_ANALYTICS_ENABLED=false \
-  LIQUIBASE_SHOW_BANNER=false \
+  env -i \
+    PATH="$PATH" \
+    HOME="$HOME" \
+    JAVA_HOME="$JAVA_HOME" \
+    LIQUIBASE_COMMAND_USERNAME="$MIGRATOR_USER" \
+    LIQUIBASE_COMMAND_PASSWORD="$MIGRATOR_PASSWORD" \
+    LIQUIBASE_ANALYTICS_ENABLED=false \
+    LIQUIBASE_SHOW_BANNER=false \
     "$MIGRATIONS_LIQUIBASE_BIN" \
       --classpath="$MSSQL_JDBC_JAR" \
       --search-path="$MIGRATIONS_DIR" \

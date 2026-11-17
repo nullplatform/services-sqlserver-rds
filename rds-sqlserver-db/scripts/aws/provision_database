@@ -4,6 +4,32 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib"
 
+read_tofu_password() {
+  local name="$1" value
+
+  value=$(tofu output -raw "$name" 2>/dev/null) \
+    || die "could not read ${name} from the db_setup module outputs"
+
+  if [ -z "$value" ]; then
+    die "${name} output is empty — did the db_setup module apply successfully?"
+  fi
+
+  validate_password "$value"
+  echo "$value"
+}
+
+provision_login() {
+  local user="$1" password="$2"
+
+  sqlcmd_exec master "$SERVICE_PATH/sql/create_database_and_login.sql" \
+    -v DbName="$DB_NAME" \
+    -v DbUser="$user" \
+    -v DbPassword="$password"
+
+  sqlcmd_exec "$DB_NAME" "$SERVICE_PATH/sql/create_user.sql" \
+    -v DbUser="$user"
+}
+
 if [ "${SETUP_SKIPPED:-}" = "true" ]; then
   echo "Skipping database provisioning — setup was not completed."
   exit 0
@@ -15,45 +41,16 @@ validate_identifier "migrations username" "${MIGRATOR_USERNAME:-}"
 
 cd "$OUTPUT_DIR"
 
-DB_PASSWORD=$(tofu output -raw db_password 2>/dev/null) \
-  || die "could not read db_password from the db_setup module outputs"
-
-if [ -z "$DB_PASSWORD" ]; then
-  die "db_password output is empty — did the db_setup module apply successfully?"
-fi
-
-validate_password "$DB_PASSWORD"
-
-MIGRATOR_PASSWORD=$(tofu output -raw migrator_password 2>/dev/null) \
-  || die "could not read migrator_password from the db_setup module outputs"
-
-if [ -z "$MIGRATOR_PASSWORD" ]; then
-  die "migrator_password output is empty — did the db_setup module apply successfully?"
-fi
-
-validate_password "$MIGRATOR_PASSWORD"
+DB_PASSWORD=$(read_tofu_password db_password)
+MIGRATOR_PASSWORD=$(read_tofu_password migrator_password)
 
 fetch_master_credentials "$MASTER_SECRET_ARN"
 
 echo "Provisioning database ${DB_NAME} and login ${DB_USERNAME} on ${DB_HOST}..."
-
-sqlcmd_exec master "$SERVICE_PATH/sql/create_database_and_login.sql" \
-  -v DbName="$DB_NAME" \
-  -v DbUser="$DB_USERNAME" \
-  -v DbPassword="$DB_PASSWORD"
-
-sqlcmd_exec "$DB_NAME" "$SERVICE_PATH/sql/create_user.sql" \
-  -v DbUser="$DB_USERNAME"
+provision_login "$DB_USERNAME" "$DB_PASSWORD"
 
 echo "Provisioning migrations login ${MIGRATOR_USERNAME} as db_owner of ${DB_NAME}..."
-
-sqlcmd_exec master "$SERVICE_PATH/sql/create_database_and_login.sql" \
-  -v DbName="$DB_NAME" \
-  -v DbUser="$MIGRATOR_USERNAME" \
-  -v DbPassword="$MIGRATOR_PASSWORD"
-
-sqlcmd_exec "$DB_NAME" "$SERVICE_PATH/sql/create_user.sql" \
-  -v DbUser="$MIGRATOR_USERNAME"
+provision_login "$MIGRATOR_USERNAME" "$MIGRATOR_PASSWORD"
 
 sqlcmd_exec "$DB_NAME" "$SERVICE_PATH/sql/add_db_owner.sql" \
   -v DbUser="$MIGRATOR_USERNAME"

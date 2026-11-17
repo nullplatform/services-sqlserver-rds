@@ -7,7 +7,12 @@
   "parameters": {
     "schema": {
       "type": "object",
-      "required": ["repository_url", "ref", "environment_directory", "mode"],
+      "required": [
+        "repository_url",
+        "ref",
+        "environment_directory",
+        "mode"
+      ],
       "properties": {
         "repository_url": {
           "type": "string",
@@ -42,8 +47,14 @@
           "title": "Mode",
           "default": "preview",
           "oneOf": [
-            { "const": "preview", "title": "Preview: validate and show the SQL, change nothing" },
-            { "const": "apply", "title": "Apply: run the scripts and move them to history" }
+            {
+              "const": "preview",
+              "title": "Preview: validate and show the SQL, change nothing"
+            },
+            {
+              "const": "apply",
+              "title": "Apply: run the scripts and move them to history"
+            }
           ]
         }
       }
@@ -55,11 +66,21 @@
       "type": "object",
       "required": [],
       "properties": {
-        "mode": { "type": "string" },
-        "ref": { "type": "string" },
-        "scripts": { "type": "array", "items": { "type": "string" } },
-        "history_commit": { "type": "string" },
-        "preview_sql": { "type": "string" }
+        "mode": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "scripts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "history_commit": {
+          "type": "string"
+        }
       }
     },
     "values": {}

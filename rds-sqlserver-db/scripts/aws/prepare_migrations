@@ -3,7 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib"
-source "$SCRIPT_DIR/github_app"
 source "$SCRIPT_DIR/migrations_lib"
 
 load_migration_parameters
@@ -37,7 +36,8 @@ fi
 
 VIOLATIONS=""
 while IFS= read -r name; do
-  found=$(forbidden_commands "${SOURCE_DIR}/${name}" "$ENVIRONMENT_DIRECTORY")
+  found=$(forbidden_commands "${SOURCE_DIR}/${name}" "$ENVIRONMENT_DIRECTORY") \
+    || die "could not read ${name} to check it for forbidden commands"
   if [ -n "$found" ]; then
     VIOLATIONS="${VIOLATIONS}  - ${name}: ${found}"$'\n'
   fi
