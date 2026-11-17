@@ -43,7 +43,7 @@ setup_migrations_env() {
 }
 
 set_migration_parameters() {
-  CONTEXT=$(jq -nc --argjson parameters "$1" '{service: {id: "svc-1"}, parameters: $parameters}')
+  CONTEXT=$(jq -nc --argjson parameters "$1" '{service: {id: "svc-1"}, tags: {namespace: "abc-core"}, parameters: $parameters}')
   export CONTEXT
 }
 

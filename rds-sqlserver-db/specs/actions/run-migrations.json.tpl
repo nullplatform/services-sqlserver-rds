@@ -17,7 +17,7 @@
         "repository_url": {
           "type": "string",
           "title": "Repository URL",
-          "description": "GitHub repository holding the scripts, e.g. https://github.com/my-org/abc-databases",
+          "description": "The application's <sigla>-databases repository on GitHub, e.g. https://github.com/my-org/abcd-databases. The sigla comes from the namespace slug up to the first dash",
           "pattern": "^(https://github\\.com/|git@github\\.com:)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?(\\.git)?/?$"
         },
         "ref": {
