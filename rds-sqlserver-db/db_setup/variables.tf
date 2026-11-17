@@ -39,3 +39,8 @@ variable "master_secret_arn" {
   type        = string
   description = "ARN of the Secrets Manager secret holding the server master credentials"
 }
+
+variable "migrator_username" {
+  type        = string
+  description = "Login and database user name that runs migrations, db_owner on this database only"
+}

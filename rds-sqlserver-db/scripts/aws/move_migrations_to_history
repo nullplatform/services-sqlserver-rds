@@ -1,0 +1,85 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib"
+source "$SCRIPT_DIR/github_app"
+source "$SCRIPT_DIR/migrations_lib"
+
+MOVE_ATTEMPTS=3
+
+default_branch() {
+  local token="$1" response
+
+  response=$(github_api GET "/repos/${GITHUB_REPOSITORY}" "$token") || return 1
+  if [ "$(github_api_status "$response")" != "200" ]; then
+    echo "GitHub refused to read ${GITHUB_REPOSITORY}: $(github_api_message "$response")" >&2
+    return 1
+  fi
+  github_api_body "$response" | jq -r '.default_branch // empty'
+}
+
+commit_history_move() {
+  local token="$1" branch="$2" work_dir="$3" timestamp ref_label name base target count
+
+  timestamp=$(cat "${MIGRATIONS_DIR}/timestamp")
+  ref_label=$(printf '%s' "$MIGRATIONS_REF" | tr '/' '-')
+
+  rm -rf "$work_dir"
+  git_with_token "$token" clone --quiet --depth 1 --branch "$branch" \
+    "https://github.com/${GITHUB_REPOSITORY}.git" "$work_dir" || return 1
+
+  mkdir -p "${work_dir}/${SCRIPTS_PATH}/history" || return 1
+
+  while IFS= read -r name; do
+    base="${name%.sql}"
+    target="${SCRIPTS_PATH}/history/${base}_${ref_label}_${timestamp}.sql"
+    cp "${MIGRATIONS_DIR}/repo/${SCRIPTS_PATH}/${name}" "${work_dir}/${target}" || return 1
+    git -C "$work_dir" add -- "$target" || return 1
+    git -C "$work_dir" rm --quiet --ignore-unmatch -- "${SCRIPTS_PATH}/${name}" || return 1
+  done < "${MIGRATIONS_DIR}/pending.txt"
+
+  count=$(wc -l < "${MIGRATIONS_DIR}/pending.txt" | tr -d ' ')
+  git -C "$work_dir" \
+    -c user.name="nullplatform migrations" \
+    -c user.email="migrations@nullplatform.com" \
+    commit --quiet -m "chore(migrations): move ${count} script(s) of ${SCRIPTS_PATH} to history after ${MIGRATIONS_REF}" \
+    || return 1
+
+  git_with_token "$token" -C "$work_dir" push --quiet origin "HEAD:refs/heads/${branch}" || return 1
+
+  git -C "$work_dir" rev-parse HEAD > "${MIGRATIONS_DIR}/history_commit"
+}
+
+move_to_history() {
+  local token branch attempt
+
+  if [ "$MIGRATIONS_MODE" != "apply" ]; then
+    echo "Preview mode: nothing to move to history."
+    return 0
+  fi
+
+  token=$(mint_github_token "$GITHUB_REPOSITORY" write)
+
+  branch="$HISTORY_BRANCH"
+  if [ -z "$branch" ]; then
+    branch=$(default_branch "$token") || die "could not read the default branch of ${GITHUB_REPOSITORY}; set history_branch"
+  fi
+  validate_git_ref "history branch" "$branch"
+
+  for attempt in $(seq 1 "$MOVE_ATTEMPTS"); do
+    echo "Moving the executed scripts to ${SCRIPTS_PATH}/history on ${branch} (attempt ${attempt}/${MOVE_ATTEMPTS})..."
+    if commit_history_move "$token" "$branch" "${MIGRATIONS_DIR}/history-repo"; then
+      echo "Moved to history in commit $(cat "${MIGRATIONS_DIR}/history_commit")."
+      return 0
+    fi
+    sleep "$attempt"
+  done
+
+  echo "These scripts ran on ${DB_NAME} but are still pending in ${SCRIPTS_PATH} on ${branch}:" >&2
+  sed 's/^/  - /' "${MIGRATIONS_DIR}/pending.txt" >&2
+  die "could not move the executed scripts to history on ${branch}: move them by hand before the next run, otherwise a new tag runs them again"
+}
+
+load_migration_parameters
+move_to_history

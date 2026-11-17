@@ -1,0 +1,248 @@
+#!/bin/bash
+
+LIQUIBASE_VERSION="5.0.2"
+JAVA_GLIBC_VERSION="zulu-21.54.109.0"
+JAVA_MUSL_VERSION="zulu-musl-21.54.109.0"
+MSSQL_JDBC_VERSION="13.6.2.jre11"
+MSSQL_JDBC_SHA256="5fbc0a70fe4d1d563d431a41b23f493d68807571f0bb49db0bb1737e83e9161f"
+
+if ! type -t migration_parameter >/dev/null 2>&1; then
+migration_parameter() {
+  echo "$CONTEXT" | jq -r --arg name "$1" '.parameters[$name] // "" | tostring'
+}
+fi
+
+if ! type -t validate_git_ref >/dev/null 2>&1; then
+validate_git_ref() {
+  local label="$1" value="$2"
+
+  if [ -z "$value" ]; then
+    die "${label} is empty"
+  fi
+
+  if ! printf '%s' "$value" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9._/-]*$' || [[ "$value" == *..* ]]; then
+    die "${label} '${value}' is not a valid tag or branch name"
+  fi
+}
+fi
+
+if ! type -t validate_directory_name >/dev/null 2>&1; then
+validate_directory_name() {
+  local label="$1" value="$2"
+
+  if ! printf '%s' "$value" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+    die "${label} '${value}' must be a single directory name (letters, digits, '_' or '-')"
+  fi
+}
+fi
+
+if ! type -t load_migration_parameters >/dev/null 2>&1; then
+load_migration_parameters() {
+  REPOSITORY_URL=$(migration_parameter repository_url)
+  MIGRATIONS_REF=$(migration_parameter ref)
+  ENVIRONMENT_DIRECTORY=$(migration_parameter environment_directory)
+  DATABASE_DIRECTORY=$(migration_parameter database_directory)
+  HISTORY_BRANCH=$(migration_parameter history_branch)
+  MIGRATIONS_MODE=$(migration_parameter mode)
+
+  if [ -z "$REPOSITORY_URL" ]; then
+    die "repository_url is empty"
+  fi
+  GITHUB_REPOSITORY=$(github_repository_of "$REPOSITORY_URL")
+
+  validate_git_ref "ref" "$MIGRATIONS_REF"
+
+  if [ -n "$HISTORY_BRANCH" ]; then
+    validate_git_ref "history_branch" "$HISTORY_BRANCH"
+  fi
+
+  DATABASE_DIRECTORY="${DATABASE_DIRECTORY:-${DB_NAME:-}}"
+  validate_directory_name "environment_directory" "$ENVIRONMENT_DIRECTORY"
+  validate_directory_name "database_directory" "$DATABASE_DIRECTORY"
+
+  case "$MIGRATIONS_MODE" in
+    preview|apply) ;;
+    *) die "mode '${MIGRATIONS_MODE}' is not valid (expected preview or apply)" ;;
+  esac
+
+  if [ -z "${OUTPUT_DIR:-}" ]; then
+    die "OUTPUT_DIR is not set. Expected to be exported by build_context."
+  fi
+
+  MIGRATIONS_DIR="${OUTPUT_DIR}/migrations"
+  SCRIPTS_PATH="${ENVIRONMENT_DIRECTORY}/${DATABASE_DIRECTORY}"
+
+  export REPOSITORY_URL MIGRATIONS_REF ENVIRONMENT_DIRECTORY DATABASE_DIRECTORY HISTORY_BRANCH
+  export MIGRATIONS_MODE GITHUB_REPOSITORY MIGRATIONS_DIR SCRIPTS_PATH
+}
+fi
+
+if ! type -t pending_scripts >/dev/null 2>&1; then
+pending_scripts() {
+  cat "${MIGRATIONS_DIR}/pending.txt"
+}
+fi
+
+if ! type -t strip_sql_comments >/dev/null 2>&1; then
+strip_sql_comments() {
+  awk '
+    {
+      line = $0
+      out = ""
+      while (length(line) > 0) {
+        if (in_block) {
+          end = index(line, "*/")
+          if (end == 0) { line = ""; break }
+          line = substr(line, end + 2)
+          in_block = 0
+          continue
+        }
+        block = index(line, "/*")
+        dash = index(line, "--")
+        if (dash > 0 && (block == 0 || dash < block)) {
+          out = out substr(line, 1, dash - 1)
+          line = ""
+          break
+        }
+        if (block > 0) {
+          out = out substr(line, 1, block - 1) " "
+          line = substr(line, block + 2)
+          in_block = 1
+          continue
+        }
+        out = out line
+        line = ""
+      }
+      print out
+    }
+  ' "$1"
+}
+fi
+
+if ! type -t forbidden_commands >/dev/null 2>&1; then
+forbidden_commands() {
+  local file="$1" environment="$2" content found=""
+
+  content=$(strip_sql_comments "$file" | tr '\n' ' ' | tr '[:lower:]' '[:upper:]')
+
+  if printf '%s' "$content" | grep -Eq '(^|[^A-Z0-9_])GRANT[^;]*[^A-Z0-9_]CONNECT([^A-Z0-9_]|$)'; then
+    found="GRANT CONNECT"
+  fi
+
+  if [ "$environment" != "dev" ]; then
+    if printf '%s' "$content" | grep -Eq '(^|[^A-Z0-9_])DROP[[:space:]]'; then
+      found="${found:+${found}, }DROP"
+    fi
+    if printf '%s' "$content" | grep -Eq '(^|[^A-Z0-9_])TRUNCATE[[:space:]]'; then
+      found="${found:+${found}, }TRUNCATE"
+    fi
+    if printf '%s' "$content" | grep -Eq '(^|[^A-Z0-9_])SELECT[[:space:]]+\*'; then
+      found="${found:+${found}, }SELECT *"
+    fi
+  fi
+
+  echo "$found"
+}
+fi
+
+if ! type -t has_bom >/dev/null 2>&1; then
+has_bom() {
+  [ "$(head -c 3 "$1")" = "$(printf '\357\273\277')" ]
+}
+fi
+
+if ! type -t copy_without_bom >/dev/null 2>&1; then
+copy_without_bom() {
+  local source="$1" target="$2"
+
+  if has_bom "$source"; then
+    tail -c +4 "$source" > "$target" || return 1
+    return 0
+  fi
+
+  cp "$source" "$target"
+}
+fi
+
+if ! type -t is_musl >/dev/null 2>&1; then
+is_musl() {
+  local loader
+
+  for loader in /lib/ld-musl-*; do
+    [ -e "$loader" ] && return 0
+  done
+  return 1
+}
+fi
+
+if ! type -t mise_install_path >/dev/null 2>&1; then
+mise_install_path() {
+  local kind="$1" tool="$2"
+
+  command -v mise >/dev/null 2>&1 || die "mise is not available to install ${tool}"
+
+  echo "Installing ${tool} with mise..." >&2
+  mise install "$tool" >&2 || die "could not install ${tool} with mise"
+
+  if [ "$kind" = "where" ]; then
+    mise where "$tool" || die "mise installed ${tool} but did not report where"
+  else
+    mise bin-paths "$tool" || die "mise installed ${tool} but did not report its bin path"
+  fi
+}
+fi
+
+if ! type -t sha256_of >/dev/null 2>&1; then
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+fi
+
+if ! type -t require_mssql_jdbc >/dev/null 2>&1; then
+require_mssql_jdbc() {
+  local cache_dir jar url
+
+  cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/np-rds-sqlserver"
+  jar="${cache_dir}/mssql-jdbc-${MSSQL_JDBC_VERSION}.jar"
+  url="https://repo1.maven.org/maven2/com/microsoft/sqlserver/mssql-jdbc/${MSSQL_JDBC_VERSION}/mssql-jdbc-${MSSQL_JDBC_VERSION}.jar"
+
+  mkdir -p "$cache_dir" || die "could not create ${cache_dir}"
+
+  if [ ! -f "$jar" ] || [ "$(sha256_of "$jar")" != "$MSSQL_JDBC_SHA256" ]; then
+    echo "Downloading mssql-jdbc ${MSSQL_JDBC_VERSION}..." >&2
+    curl -sSfL --connect-timeout 10 --max-time 120 -o "${jar}.part" "$url" \
+      || die "could not download mssql-jdbc ${MSSQL_JDBC_VERSION} from Maven Central"
+    if [ "$(sha256_of "${jar}.part")" != "$MSSQL_JDBC_SHA256" ]; then
+      rm -f "${jar}.part"
+      die "mssql-jdbc ${MSSQL_JDBC_VERSION} downloaded from Maven Central does not match its pinned sha256"
+    fi
+    mv "${jar}.part" "$jar" || die "could not store mssql-jdbc in ${cache_dir}"
+  fi
+
+  echo "$jar"
+}
+fi
+
+if ! type -t require_liquibase >/dev/null 2>&1; then
+require_liquibase() {
+  local java_version="$JAVA_GLIBC_VERSION" liquibase_bin_dir
+
+  if is_musl; then
+    java_version="$JAVA_MUSL_VERSION"
+  fi
+
+  JAVA_HOME=$(mise_install_path where "java@${java_version}")
+  liquibase_bin_dir=$(mise_install_path bin-paths "liquibase@${LIQUIBASE_VERSION}")
+  MIGRATIONS_LIQUIBASE_BIN="${liquibase_bin_dir}/liquibase"
+  MSSQL_JDBC_JAR=$(require_mssql_jdbc)
+
+  [ -x "${JAVA_HOME}/bin/java" ] || die "java ${java_version} was installed with mise but ${JAVA_HOME}/bin/java is missing"
+  [ -x "$MIGRATIONS_LIQUIBASE_BIN" ] || die "liquibase ${LIQUIBASE_VERSION} was installed with mise but ${MIGRATIONS_LIQUIBASE_BIN} is missing"
+
+  export JAVA_HOME MIGRATIONS_LIQUIBASE_BIN MSSQL_JDBC_JAR
+}
+fi

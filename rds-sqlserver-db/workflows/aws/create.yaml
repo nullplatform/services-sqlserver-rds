@@ -57,6 +57,8 @@ steps:
         type: environment
       - name: DB_USERNAME
         type: environment
+      - name: MIGRATOR_USERNAME
+        type: environment
       - name: SETUP_SKIPPED
         type: environment
 

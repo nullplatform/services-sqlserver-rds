@@ -34,6 +34,8 @@ The Secrets Manager secret is named
 |---|---|---|
 | database + login | `master` | `create_database_and_login.sql` |
 | database user | the application database | `create_user.sql` |
+| migrations login + user | `master`, then the application database | `create_database_and_login.sql`, `create_user.sql` |
+| migrations user as `db_owner` | the application database | `add_db_owner.sql` |
 | role membership | the application database | `set_role_members.sql` |
 | user cleanup | the application database | `drop_user.sql` |
 | login cleanup | `master` | `drop_login.sql` |
@@ -56,6 +58,47 @@ roles, and it is why `revoke_access` is the same script with every flag at 0.
 
 `db_ddladmin` is included in `read-write` so applications can run their own
 schema migrations.
+
+## Migrations
+
+The `run-migrations` action runs the `.sql` scripts of a GitHub repository with
+Liquibase, as a dedicated **migrations user** (`<app user>_mig`) that is
+`db_owner` of this database and has no server-level role. Its credentials live
+in `nullplatform/rds-sqlserver/<service slug>-<service id>/migrator`. Services
+created before this action get the user on their next `update`; until then the
+action asks for one.
+
+The repository follows the `<sigla>-databases` layout:
+
+```
+<environment>/<database>/NN_description.sql   pending
+<environment>/<database>/history/             already ran
+```
+
+| Parameter | Meaning |
+|---|---|
+| `repository_url` | `https://github.com/<org>/<repo>` |
+| `ref` | tag or branch to read the scripts from |
+| `environment_directory` | e.g. `dev`, `qas`, `prd` |
+| `database_directory` | defaults to the database name |
+| `mode` | `preview` validates and prints the SQL; `apply` runs it |
+| `history_branch` | branch that receives `history/`; defaults to the repository's default branch |
+
+`apply` runs the pending scripts in name order, then moves them to
+`history/<name>_<ref>_<timestamp>.sql` on `history_branch` in a single commit.
+Each script is one changeset, split into batches on `GO` lines only. The
+changeset id is `<script>_<ref>`, or `<script>_<timestamp>` with `runOnChange`
+in `dev`, so re-running a tag skips what it already applied. The move to
+`history/` is what keeps a script from running again under a new tag: if it
+fails, the action lists the scripts to move by hand.
+
+`GRANT CONNECT` is rejected in every environment; `DROP`, `TRUNCATE` and
+`SELECT *` everywhere except `dev`.
+
+The repository is read and written with the agent's GitHub App
+(`NP_GITHUB_APPS`), which needs **Contents: Read and write** on it. Java 21,
+Liquibase, the `mssql-jdbc` driver and `step` (to sign the App's JWT) are
+installed at pinned versions with `mise` on first use.
 
 ## What survives a delete
 

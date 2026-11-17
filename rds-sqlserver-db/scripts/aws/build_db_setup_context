@@ -104,6 +104,8 @@ fi
 validate_identifier "database name" "$DB_NAME_VAL"
 validate_identifier "database username" "$DB_USERNAME_VAL"
 
+MIGRATOR_USERNAME=$(migrator_username_for "$DB_USERNAME_VAL")
+
 SERVICE_SLUG=$(echo "$CONTEXT" | jq -r '.service.slug // .service.name // ""')
 
 if [ -z "$SERVICE_SLUG" ]; then
@@ -115,6 +117,7 @@ INSTANCE_NAME=$(instance_name_for "$SERVICE_SLUG" "$SERVICE_ID")
 export DB_HOST DB_PORT MASTER_SECRET_ARN
 export DB_NAME="$DB_NAME_VAL"
 export DB_USERNAME="$DB_USERNAME_VAL"
+export MIGRATOR_USERNAME
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -122,4 +125,4 @@ export TOFU_MODULE_DIR="$SERVICE_PATH/db_setup"
 
 export TOFU_INIT_VARIABLES="-backend-config=bucket=${TFSTATE_BUCKET} -backend-config=key=${TFSTATE_KEY_PREFIX}db_setup.tfstate -backend-config=region=${REGION}"
 
-export TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=instance_name=${INSTANCE_NAME} -var=region=${REGION} -var=db_host=${DB_HOST} -var=db_port=${DB_PORT} -var=db_name=${DB_NAME} -var=db_username=${DB_USERNAME} -var=master_secret_arn=${MASTER_SECRET_ARN}"
+export TOFU_VARIABLES="-var=service_id=${SERVICE_ID} -var=instance_name=${INSTANCE_NAME} -var=region=${REGION} -var=db_host=${DB_HOST} -var=db_port=${DB_PORT} -var=db_name=${DB_NAME} -var=db_username=${DB_USERNAME} -var=migrator_username=${MIGRATOR_USERNAME} -var=master_secret_arn=${MASTER_SECRET_ARN}"

@@ -33,3 +33,19 @@ output "app_secret_arn" {
   value       = aws_secretsmanager_secret.app.arn
   description = "ARN of the Secrets Manager secret holding the app-level credentials"
 }
+
+output "migrator_username" {
+  value       = var.migrator_username
+  description = "Login and database user name that runs migrations"
+}
+
+output "migrator_password" {
+  value       = random_password.migrator.result
+  sensitive   = true
+  description = "Password of the migrations user"
+}
+
+output "migrator_secret_arn" {
+  value       = aws_secretsmanager_secret.migrator.arn
+  description = "ARN of the Secrets Manager secret holding the migrations user credentials"
+}

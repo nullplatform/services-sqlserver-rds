@@ -58,7 +58,8 @@ SERVER_PORT=$(echo "$SERVICE_JSON"              | jq -r '.attributes.port       
 SERVER_MASTER_SECRET_ARN=$(echo "$SERVICE_JSON" | jq -r '.attributes.master_secret_arn // ""')
 DB_NAME=$(echo "$SERVICE_JSON"                  | jq -r '.attributes.database_name     // ""')
 DB_USERNAME=$(echo "$SERVICE_JSON"              | jq -r '.attributes.username          // ""')
-export SERVER_HOSTNAME SERVER_PORT SERVER_MASTER_SECRET_ARN DB_NAME DB_USERNAME
+MIGRATOR_SECRET_ARN=$(echo "$SERVICE_JSON"      | jq -r '.attributes.migrator_secret_arn // ""')
+export SERVER_HOSTNAME SERVER_PORT SERVER_MASTER_SECRET_ARN DB_NAME DB_USERNAME MIGRATOR_SECRET_ARN
 
 if [ "${ACTION_SOURCE:-}" = "link" ]; then
   LINK_ID=$(echo "$CONTEXT"   | jq -r '.link.id        // ""')
