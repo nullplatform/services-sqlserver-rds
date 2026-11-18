@@ -189,19 +189,6 @@ mint_github_token() (
 )
 fi
 
-if ! type -t github_default_branch >/dev/null 2>&1; then
-github_default_branch() {
-  local repository="$1" token="$2" response
-
-  response=$(github_api GET "/repos/${repository}" "$token") \
-    || die "could not reach the GitHub API to read ${repository}"
-  if [ "$(github_api_status "$response")" != "200" ]; then
-    die "GitHub refused to read ${repository}: $(github_api_message "$response")"
-  fi
-  github_api_body "$response" | jq -r '.default_branch // empty'
-}
-fi
-
 if ! type -t git_with_token >/dev/null 2>&1; then
 git_with_token() {
   local token="$1" header

@@ -9,10 +9,10 @@ source "$SCRIPT_DIR/migrations_lib"
 MOVE_ATTEMPTS=3
 
 commit_history_move() {
-  local token="$1" branch="$2" work_dir="$3" timestamp ref_label name base target count
+  local token="$1" branch="$2" work_dir="$3" timestamp commit_label name base target count
 
   timestamp=$(cat "${MIGRATIONS_DIR}/timestamp") || return 1
-  ref_label=$(printf '%s' "$MIGRATIONS_REF" | tr '/' '-') || return 1
+  commit_label=$(migrations_commit_label) || return 1
 
   rm -rf "$work_dir"
   git_with_token "$token" clone --quiet --depth 1 --branch "$branch" \
@@ -23,7 +23,7 @@ commit_history_move() {
 
   while IFS= read -r name; do
     base="${name%.sql}"
-    target="${SCRIPTS_PATH}/history/${base}_${ref_label}_${timestamp}.sql"
+    target="${SCRIPTS_PATH}/history/${base}_${commit_label}_${timestamp}.sql"
     cp "${MIGRATIONS_DIR}/repo/${SCRIPTS_PATH}/${name}" "${work_dir}/${target}" || return 1
     git -C "$work_dir" add -- "$target" || return 1
     git -C "$work_dir" rm --quiet --ignore-unmatch -- "${SCRIPTS_PATH}/${name}" || return 1
@@ -39,7 +39,7 @@ commit_history_move() {
   git -C "$work_dir" \
     -c user.name="nullplatform migrations" \
     -c user.email="migrations@nullplatform.com" \
-    commit --quiet -m "chore(migrations): move ${count} script(s) of ${SCRIPTS_PATH} to history after ${MIGRATIONS_REF}" \
+    commit --quiet -m "chore(migrations): move ${count} script(s) of ${SCRIPTS_PATH} to history after ${commit_label}" \
     || return 1
 
   git_with_token "$token" -C "$work_dir" push --quiet origin "HEAD:refs/heads/${branch}" || return 1
@@ -50,7 +50,7 @@ commit_history_move() {
 fail_with_pending_scripts() {
   echo "These scripts ran on ${DB_NAME} but are still pending in ${SCRIPTS_PATH}:" >&2
   sed 's/^/  - /' "${MIGRATIONS_DIR}/pending.txt" >&2
-  die "$1: move them to history by hand before the next run, otherwise a new tag runs them again"
+  die "$1: move them to history by hand before the next run, otherwise a new commit on ${MIGRATIONS_BRANCH} runs them again"
 }
 
 move_to_history() {
@@ -61,8 +61,7 @@ move_to_history() {
     return 0
   fi
 
-  branch=$(cat "${MIGRATIONS_DIR}/history_branch") \
-    || fail_with_pending_scripts "the history branch resolved before the update is missing"
+  branch="$MIGRATIONS_BRANCH"
   token=$(mint_github_token "$GITHUB_REPOSITORY" write) \
     || fail_with_pending_scripts "could not get a write token for ${GITHUB_REPOSITORY}"
 

@@ -1,5 +1,6 @@
 #!/bin/bash
 
+MIGRATIONS_BRANCH="main"
 LIQUIBASE_VERSION="5.0.2"
 JAVA_GLIBC_VERSION="zulu-21.54.109.0"
 JAVA_MUSL_VERSION="zulu-musl-21.54.109.0"
@@ -12,28 +13,6 @@ migration_parameter() {
 }
 fi
 
-if ! type -t github_repository_of >/dev/null 2>&1; then
-github_repository_of() {
-  local url="$1" path
-
-  case "$url" in
-    https://github.com/*) path="${url#https://github.com/}" ;;
-    git@github.com:*)     path="${url#git@github.com:}" ;;
-    *) die "repository_url '${url}' is not a github.com repository (expected https://github.com/<org>/<repo>)" ;;
-  esac
-
-  path="${path%/}"
-  path="${path%.git}"
-
-  if ! printf '%s' "$path" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' \
-    || printf '%s' "$path" | grep -Eq '(^|/)\.+(/|$)'; then
-    die "repository_url '${url}' is not a github.com repository (expected https://github.com/<org>/<repo>)"
-  fi
-
-  echo "$path"
-}
-fi
-
 if ! type -t reject_symlinks >/dev/null 2>&1; then
 reject_symlinks() {
   local dir="$1" label="$2" links
@@ -42,20 +21,6 @@ reject_symlinks() {
     || die "could not inspect ${label} for symbolic links"
   if [ -n "$links" ]; then
     die "${label} contains symbolic links, which are not allowed: $(echo "$links" | sed 's|^\./||' | paste -sd, -)"
-  fi
-}
-fi
-
-if ! type -t validate_git_ref >/dev/null 2>&1; then
-validate_git_ref() {
-  local label="$1" value="$2"
-
-  if [ -z "$value" ]; then
-    die "${label} is empty"
-  fi
-
-  if ! printf '%s' "$value" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9._/-]*$' || [[ "$value" == *..* ]]; then
-    die "${label} '${value}' is not a valid tag or branch name"
   fi
 }
 fi
@@ -90,40 +55,51 @@ resolve_sigla() {
 }
 fi
 
-if ! type -t require_sigla_repository >/dev/null 2>&1; then
-require_sigla_repository() {
-  local repository="$1" sigla="$2" expected actual
+if ! type -t migrations_github_org >/dev/null 2>&1; then
+migrations_github_org() {
+  local org orgs count
 
-  expected=$(printf '%s-databases' "$sigla" | tr '[:upper:]' '[:lower:]')
-  actual=$(printf '%s' "${repository#*/}" | tr '[:upper:]' '[:lower:]')
-
-  if [ "$actual" != "$expected" ]; then
-    die "repository ${repository} does not belong to this application: its sigla is ${sigla}, so migrations must come from <org>/${expected}"
+  org=$(yaml_value "migrations_github_org" "" "${VALUES:-}")
+  if [ -n "$org" ]; then
+    echo "$org"
+    return 0
   fi
+
+  orgs=$(tr ';' '\n' <<< "${NP_GITHUB_APPS:-}" | awk -F, '{ for (i = 1; i <= NF; i++) if ($i ~ /^org=/) print substr($i, 5) }')
+  count=$(grep -c . <<< "$orgs" || true)
+
+  if [ "$count" -ne 1 ]; then
+    die "cannot tell which GitHub org holds the <sigla>-databases repositories: set migrations_github_org in values.yaml (the agent has GitHub Apps for: $(paste -sd, - <<< "$orgs"))"
+  fi
+
+  echo "$orgs"
+}
+fi
+
+if ! type -t migrations_environment >/dev/null 2>&1; then
+migrations_environment() {
+  local environment
+
+  environment=$(jq -r '.service.dimensions.environment // empty' <<< "$1")
+  if [ -z "$environment" ]; then
+    die "the service has no environment dimension, which names the directory of the repository to read"
+  fi
+
+  validate_directory_name "environment dimension" "$environment"
+  echo "$environment"
 }
 fi
 
 if ! type -t load_migration_parameters >/dev/null 2>&1; then
 load_migration_parameters() {
-  REPOSITORY_URL=$(migration_parameter repository_url)
-  MIGRATIONS_REF=$(migration_parameter ref)
-  ENVIRONMENT_DIRECTORY=$(migration_parameter environment_directory)
   DATABASE_DIRECTORY=$(migration_parameter database_directory)
-  HISTORY_BRANCH=$(migration_parameter history_branch)
   MIGRATIONS_MODE=$(migration_parameter mode)
 
-  GITHUB_REPOSITORY=$(github_repository_of "$REPOSITORY_URL")
   SIGLA=$(resolve_sigla "$CONTEXT")
-  require_sigla_repository "$GITHUB_REPOSITORY" "$SIGLA"
-
-  validate_git_ref "ref" "$MIGRATIONS_REF"
-
-  if [ -n "$HISTORY_BRANCH" ]; then
-    validate_git_ref "history_branch" "$HISTORY_BRANCH"
-  fi
+  ENVIRONMENT_DIRECTORY=$(migrations_environment "$CONTEXT")
+  GITHUB_REPOSITORY="$(migrations_github_org)/$(printf '%s-databases' "$SIGLA" | tr '[:upper:]' '[:lower:]')"
 
   DATABASE_DIRECTORY="${DATABASE_DIRECTORY:-${DB_NAME:-}}"
-  validate_directory_name "environment_directory" "$ENVIRONMENT_DIRECTORY"
   validate_directory_name "database_directory" "$DATABASE_DIRECTORY"
 
   case "$MIGRATIONS_MODE" in
@@ -138,8 +114,16 @@ load_migration_parameters() {
   MIGRATIONS_DIR="${OUTPUT_DIR}/migrations"
   SCRIPTS_PATH="${ENVIRONMENT_DIRECTORY}/${DATABASE_DIRECTORY}"
 
-  export REPOSITORY_URL MIGRATIONS_REF ENVIRONMENT_DIRECTORY DATABASE_DIRECTORY HISTORY_BRANCH
-  export MIGRATIONS_MODE GITHUB_REPOSITORY MIGRATIONS_DIR SCRIPTS_PATH SIGLA
+  export MIGRATIONS_BRANCH ENVIRONMENT_DIRECTORY DATABASE_DIRECTORY MIGRATIONS_MODE GITHUB_REPOSITORY MIGRATIONS_DIR SCRIPTS_PATH SIGLA
+}
+fi
+
+if ! type -t migrations_commit_label >/dev/null 2>&1; then
+migrations_commit_label() {
+  local commit
+
+  commit=$(cat "${MIGRATIONS_DIR}/commit") || return 1
+  printf '%s' "${commit:0:12}"
 }
 fi
 

@@ -7,17 +7,20 @@ setup() {
   setup_migrations_env
 }
 
-@test "fetch clones the ref with a read token scoped to the repository" {
+@test "fetch clones main of the sigla repository with a read token scoped to it" {
   run_step fetch_migrations
   [ "$status" -eq 0 ]
   run grep -c 'curl-request POST https://api.github.com/app/installations/777/access_tokens {"repositories":\["abc-databases"\],"permissions":{"contents":"read"}}' "$MOCK_LOG"
   [ "$output" = "1" ]
-  run grep -c "git clone --quiet --depth 1 --branch v1.0.0 https://github.com/My-Org/abc-databases.git $OUTPUT_DIR/migrations/repo auth=x-access-token:$TEST_TOKEN" "$MOCK_LOG"
+  run grep -c "git clone --quiet --depth 1 --branch main https://github.com/My-Org/abc-databases.git $OUTPUT_DIR/migrations/repo auth=x-access-token:$TEST_TOKEN" "$MOCK_LOG"
   [ "$output" = "1" ]
+  run cat "$OUTPUT_DIR/migrations/commit"
+  [ "$output" = "0123456789abcdef0123456789abcdef01234567" ]
 }
 
 @test "the GitHub App is matched by org case-insensitively" {
-  set_migration_parameters '{"repository_url":"git@github.com:my-org/abc-databases.git","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
+  printf 'migrations_github_org: my-org\n' > "$VALUES"
+  set_migration_parameters '{"mode":"preview"}'
   run_step fetch_migrations
   [ "$status" -eq 0 ]
   run grep -c "step crypto jwt sign --key .* --iss 123 " "$MOCK_LOG"
@@ -25,23 +28,18 @@ setup() {
 }
 
 @test "preview only ever asks GitHub for a read token" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
+  set_migration_parameters '{"mode":"preview"}'
   run_step fetch_migrations
   [ "$status" -eq 0 ]
   run grep -c '"contents":"write"' "$MOCK_LOG"
   [ "$output" = "0" ]
-  [ ! -f "$OUTPUT_DIR/migrations/history_branch" ]
 }
 
-@test "apply checks the write token and resolves the history branch before touching the database" {
+@test "apply checks the write token before touching the database" {
   run_step fetch_migrations
   [ "$status" -eq 0 ]
   run grep -c '^curl-request POST .*"permissions":{"contents":"write"}' "$MOCK_LOG"
   [ "$output" = "1" ]
-  run grep -c "curl-request GET https://api.github.com/repos/My-Org/abc-databases " "$MOCK_LOG"
-  [ "$output" = "1" ]
-  run cat "$OUTPUT_DIR/migrations/history_branch"
-  [ "$output" = "master" ]
 }
 
 @test "apply stops before the database when the App cannot write to the repository" {
@@ -51,16 +49,6 @@ setup() {
   [[ "$output" == *"GitHub refused a contents:write token for My-Org/abc-databases: The permissions requested are not granted to this installation"* ]] || false
   run grep -c "^git clone" "$MOCK_LOG"
   [ "$output" = "1" ]
-}
-
-@test "history_branch overrides the default branch without asking GitHub for it" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"apply","history_branch":"develop"}'
-  run_step fetch_migrations
-  [ "$status" -eq 0 ]
-  run grep -c "curl-request GET https://api.github.com/repos/My-Org/abc-databases " "$MOCK_LOG"
-  [ "$output" = "0" ]
-  run cat "$OUTPUT_DIR/migrations/history_branch"
-  [ "$output" = "develop" ]
 }
 
 @test "a repository containing symbolic links is rejected before any script is read" {
@@ -89,7 +77,7 @@ setup() {
   run grep -c "curl-stdin-auth $TEST_JWT" "$MOCK_LOG"
   [ "$output" = "4" ]
   run grep -c "curl-stdin-auth $TEST_TOKEN" "$MOCK_LOG"
-  [ "$output" = "1" ]
+  [ "$output" = "0" ]
 }
 
 @test "an agent without GitHub Apps fails before calling GitHub" {
@@ -119,7 +107,7 @@ setup() {
 }
 
 @test "a configured installation id skips the installation lookup" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
+  set_migration_parameters '{"mode":"preview"}'
   export NP_GITHUB_APPS="org=my-org,app-id=123,installation-id=999,private-key=${KEY_FILE}"
   run_step fetch_migrations
   [ "$status" -eq 0 ]
@@ -130,7 +118,7 @@ setup() {
 }
 
 @test "a key held in SSM is read with the agent's own credentials, not the service role" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
+  set_migration_parameters '{"mode":"preview"}'
   export NP_GITHUB_APPS="org=my-org,app-id=123,private-key-ssm-parameter=/np/gh/key"
   run_step fetch_migrations
   [ "$status" -eq 0 ]
@@ -138,19 +126,18 @@ setup() {
   [ "$output" = "1" ]
 }
 
-@test "a missing tag or branch fails with the ref in the message" {
-  export GIT_MISSING_REF="v9.9.9"
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v9.9.9","environment_directory":"qas","mode":"apply"}'
+@test "a repository without a main branch says so" {
+  export GIT_MISSING_REF="main"
   run_step fetch_migrations
   [ "$status" -ne 0 ]
-  [[ "$output" == *"could not clone My-Org/abc-databases at 'v9.9.9'"* ]] || false
+  [[ "$output" == *"could not clone My-Org/abc-databases at main: check that the repository has a main branch"* ]] || false
 }
 
 @test "a missing environment or database directory is reported with its path" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"prd","mode":"apply"}'
+  set_migration_parameters '{"mode":"apply"}' prd
   run_step fetch_migrations
   [ "$status" -ne 0 ]
-  [[ "$output" == *"directory prd/app_42 does not exist in My-Org/abc-databases@v1.0.0"* ]] || false
+  [[ "$output" == *"directory prd/app_42 does not exist in My-Org/abc-databases@main"* ]] || false
 }
 
 @test "a service without the migrations user asks for an update before touching GitHub" {
@@ -162,30 +149,50 @@ setup() {
   [ "$output" = "0" ]
 }
 
-@test "parameters that could inject options or paths are rejected" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"--upload-pack=touch","environment_directory":"qas","mode":"apply"}'
+@test "an environment or database directory that could escape the repository is rejected" {
+  set_migration_parameters '{"mode":"apply"}' '../etc'
   run_step fetch_migrations
   [ "$status" -ne 0 ]
-  [[ "$output" == *"ref '--upload-pack=touch' is not a valid tag or branch name"* ]] || false
+  [[ "$output" == *"environment dimension '../etc' must be a single directory name"* ]] || false
 
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"../etc","mode":"apply"}'
+  set_migration_parameters '{"mode":"apply","database_directory":"../x"}'
   run_step fetch_migrations
   [ "$status" -ne 0 ]
-  [[ "$output" == *"environment_directory '../etc' must be a single directory name"* ]] || false
+  [[ "$output" == *"database_directory '../x' must be a single directory name"* ]] || false
+  run grep -c "^curl " "$MOCK_LOG"
+  [ "$output" = "0" ]
+}
 
-  set_migration_parameters '{"repository_url":"https://gitlab.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"apply"}'
+@test "a service without an environment dimension cannot run migrations" {
+  CONTEXT=$(jq -c 'del(.service.dimensions)' <<< "$CONTEXT")
+  export CONTEXT
   run_step fetch_migrations
   [ "$status" -ne 0 ]
-  [[ "$output" == *"is not a github.com repository"* ]] || false
+  [[ "$output" == *"the service has no environment dimension"* ]] || false
+  run grep -c "^curl " "$MOCK_LOG"
+  [ "$output" = "0" ]
+}
 
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/..","ref":"v1.0.0","environment_directory":"qas","mode":"apply"}'
+@test "without migrations_github_org the only org with a GitHub App holds the repository" {
+  : > "$VALUES"
+  export NP_GITHUB_APPS="org=Solo-Org,app-id=123,private-key=${KEY_FILE}"
+  run_step fetch_migrations
+  [ "$status" -eq 0 ]
+  run grep -c "git clone .* https://github.com/Solo-Org/abc-databases.git " "$MOCK_LOG"
+  [ "$output" = "1" ]
+}
+
+@test "without migrations_github_org several GitHub Apps are ambiguous" {
+  : > "$VALUES"
   run_step fetch_migrations
   [ "$status" -ne 0 ]
-  [[ "$output" == *"is not a github.com repository"* ]] || false
+  [[ "$output" == *"set migrations_github_org in values.yaml (the agent has GitHub Apps for: other-org,My-Org)"* ]] || false
+  run grep -c "^curl " "$MOCK_LOG"
+  [ "$output" = "0" ]
 }
 
 @test "an unknown mode is rejected" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"force"}'
+  set_migration_parameters '{"mode":"force"}'
   run_step fetch_migrations
   [ "$status" -ne 0 ]
   [[ "$output" == *"mode 'force' is not valid"* ]] || false
@@ -199,16 +206,16 @@ setup() {
   [ "$output" = $'01_create_t1.sql\n02_alter_t1.sql' ]
 }
 
-@test "outside dev the changeset id carries the ref and scripts never re-run on change" {
+@test "outside dev the changeset id carries the commit and scripts never re-run on change" {
   prepare_fetched_repo
   run_step prepare_migrations
   [ "$status" -eq 0 ]
   run jq -c '[.databaseChangeLog[].changeSet | {id, runOnChange, logicalFilePath}]' "$MIGRATIONS_DIR/changelog.json"
-  [ "$output" = '[{"id":"01_create_t1_v1.0.0","runOnChange":false,"logicalFilePath":"qas/app_42/changelog"},{"id":"02_alter_t1_v1.0.0","runOnChange":false,"logicalFilePath":"qas/app_42/changelog"}]' ]
+  [ "$output" = '[{"id":"01_create_t1_0123456789ab","runOnChange":false,"logicalFilePath":"qas/app_42/changelog"},{"id":"02_alter_t1_0123456789ab","runOnChange":false,"logicalFilePath":"qas/app_42/changelog"}]' ]
 }
 
 @test "in dev the changeset id carries the run timestamp and runs on change" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"feature/x","environment_directory":"dev","mode":"apply"}'
+  set_migration_parameters '{"mode":"apply"}' dev
   prepare_fetched_repo
   run_step prepare_migrations
   [ "$status" -eq 0 ]
@@ -230,7 +237,7 @@ setup() {
   rm "$MIGRATIONS_DIR"/repo/qas/app_42/0*.sql
   run_step prepare_migrations
   [ "$status" -ne 0 ]
-  [[ "$output" == *"no pending scripts in qas/app_42 at v1.0.0"* ]] || false
+  [[ "$output" == *"no pending scripts in qas/app_42 at main"* ]] || false
 }
 
 @test "scripts not named NN_description.sql are listed and rejected" {
@@ -252,7 +259,7 @@ setup() {
 }
 
 @test "DROP is allowed in dev" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"main","environment_directory":"dev","mode":"apply"}'
+  set_migration_parameters '{"mode":"apply"}' dev
   prepare_fetched_repo
   printf 'DROP TABLE d1;\n' > "$MIGRATIONS_DIR/repo/dev/app_42/02_drop.sql"
   run_step prepare_migrations
@@ -260,7 +267,7 @@ setup() {
 }
 
 @test "GRANT CONNECT is blocked even in dev, across lines" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"main","environment_directory":"dev","mode":"apply"}'
+  set_migration_parameters '{"mode":"apply"}' dev
   prepare_fetched_repo
   printf 'GRANT\n  CONNECT TO someone;\n' > "$MIGRATIONS_DIR/repo/dev/app_42/02_grant.sql"
   run_step prepare_migrations
@@ -303,29 +310,26 @@ setup() {
   [[ "$output" == *"03_ident.sql: DROP"* ]] || false
 }
 
-@test "the repository must be the application's sigla-databases repository" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/xyz-databases","ref":"v1.0.0","environment_directory":"qas","mode":"apply"}'
-  run_step fetch_migrations
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"repository My-Org/xyz-databases does not belong to this application: its sigla is ABC, so migrations must come from <org>/abc-databases"* ]] || false
-  run grep -c "^curl " "$MOCK_LOG"
-  [ "$output" = "0" ]
-}
-
-@test "the sigla repository is matched case-insensitively and namespace.slug wins over tags.namespace" {
-  CONTEXT=$(jq -nc '{service: {id: "svc-1"}, namespace: {slug: "Abc-core"}, tags: {namespace: "xyz-other"}, parameters: {repository_url: "https://github.com/My-Org/ABC-Databases", ref: "v1.0.0", environment_directory: "qas", mode: "preview"}}')
+@test "the repository name comes from the sigla, lowercased" {
+  CONTEXT=$(jq -c '.tags.namespace = "XYZ-payments"' <<< "$CONTEXT")
   export CONTEXT
   run_step fetch_migrations
   [ "$status" -eq 0 ]
+  run grep -c "git clone .* https://github.com/My-Org/xyz-databases.git " "$MOCK_LOG"
+  [ "$output" = "1" ]
+}
 
-  CONTEXT=$(jq -c '.parameters.repository_url = "https://github.com/My-Org/xyz-databases"' <<< "$CONTEXT")
+@test "namespace.slug wins over tags.namespace for the sigla" {
+  CONTEXT=$(jq -c '.namespace.slug = "Abc-core" | .tags.namespace = "xyz-other"' <<< "$CONTEXT")
+  export CONTEXT
   run_step fetch_migrations
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"its sigla is ABC"* ]] || false
+  [ "$status" -eq 0 ]
+  run grep -c "git clone .* https://github.com/My-Org/abc-databases.git " "$MOCK_LOG"
+  [ "$output" = "1" ]
 }
 
 @test "an application without a namespace cannot run migrations" {
-  CONTEXT=$(jq -nc '{service: {id: "svc-1"}, tags: {}, parameters: {repository_url: "https://github.com/My-Org/abc-databases", ref: "v1.0.0", environment_directory: "qas", mode: "apply"}}')
+  CONTEXT=$(jq -c '.tags = {}' <<< "$CONTEXT")
   export CONTEXT
   run_step fetch_migrations
   [ "$status" -ne 0 ]
@@ -347,7 +351,7 @@ setup() {
 }
 
 @test "preview validates and renders SQL without applying it" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
+  set_migration_parameters '{"mode":"preview"}'
   prepare_fetched_repo
   run_step prepare_migrations
   run_step_with_mocked_liquibase run_migrations
@@ -392,7 +396,7 @@ setup() {
 }
 
 @test "preview never asks GitHub for a write token" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
+  set_migration_parameters '{"mode":"preview"}'
   prepare_fetched_repo
   run_step prepare_migrations
   run_step move_migrations_to_history
@@ -401,7 +405,7 @@ setup() {
   [ "$output" = "0" ]
 }
 
-@test "apply moves the executed scripts to history on the default branch in one push" {
+@test "apply moves the executed scripts to history on main in one push" {
   prepare_fetched_repo
   run_step prepare_migrations
   timestamp=$(cat "$MIGRATIONS_DIR/timestamp")
@@ -409,27 +413,18 @@ setup() {
   [ "$status" -eq 0 ]
   run grep -c '^curl-request POST .*"permissions":{"contents":"write"}' "$MOCK_LOG"
   [ "$output" = "1" ]
-  run grep -c "git clone --quiet --depth 1 --branch master " "$MOCK_LOG"
+  run grep -c "git clone --quiet --depth 1 --branch main " "$MOCK_LOG"
   [ "$output" = "1" ]
-  [ -f "$MIGRATIONS_DIR/history-repo/qas/app_42/history/01_create_t1_v1.0.0_${timestamp}.sql" ]
-  [ -f "$MIGRATIONS_DIR/history-repo/qas/app_42/history/02_alter_t1_v1.0.0_${timestamp}.sql" ]
+  [ -f "$MIGRATIONS_DIR/history-repo/qas/app_42/history/01_create_t1_0123456789ab_${timestamp}.sql" ]
+  [ -f "$MIGRATIONS_DIR/history-repo/qas/app_42/history/02_alter_t1_0123456789ab_${timestamp}.sql" ]
   [ ! -f "$MIGRATIONS_DIR/history-repo/qas/app_42/01_create_t1.sql" ]
   [ ! -f "$MIGRATIONS_DIR/history-repo/qas/app_42/02_alter_t1.sql" ]
-  run grep -c "push --quiet origin HEAD:refs/heads/master auth=x-access-token:$TEST_TOKEN" "$MOCK_LOG"
+  run grep -c "commit --quiet -m chore(migrations): move 2 script(s) of qas/app_42 to history after 0123456789ab " "$MOCK_LOG"
+  [ "$output" = "1" ]
+  run grep -c "push --quiet origin HEAD:refs/heads/main auth=x-access-token:$TEST_TOKEN" "$MOCK_LOG"
   [ "$output" = "1" ]
   run cat "$MIGRATIONS_DIR/history_commit"
   [ "$output" = "0123456789abcdef0123456789abcdef01234567" ]
-}
-
-@test "the move pushes to the history branch resolved before the update" {
-  prepare_fetched_repo develop
-  run_step prepare_migrations
-  run_step move_migrations_to_history
-  [ "$status" -eq 0 ]
-  run grep -c "curl-request GET https://api.github.com/repos/My-Org/abc-databases " "$MOCK_LOG"
-  [ "$output" = "0" ]
-  run grep -c "push --quiet origin HEAD:refs/heads/develop " "$MOCK_LOG"
-  [ "$output" = "1" ]
 }
 
 @test "scripts already in history count as moved instead of failing the retry" {
@@ -438,7 +433,7 @@ setup() {
   run_step prepare_migrations
   run_step move_migrations_to_history
   [ "$status" -eq 0 ]
-  [[ "$output" == *"already in history on master"* ]] || false
+  [[ "$output" == *"already in history on main"* ]] || false
   run grep -cE "^git .*(commit|push) " "$MOCK_LOG"
   [ "$output" = "0" ]
 }
@@ -450,7 +445,7 @@ setup() {
   run_step prepare_migrations
   run_step move_migrations_to_history
   [ "$status" -ne 0 ]
-  [[ "$output" == *"My-Org/abc-databases@master contains symbolic links"* ]] || false
+  [[ "$output" == *"My-Org/abc-databases@main contains symbolic links"* ]] || false
   run grep -c "push --quiet" "$MOCK_LOG"
   [ "$output" = "0" ]
 }
@@ -490,14 +485,14 @@ setup() {
   [[ "$output" == *"  - 02_alter_t1.sql"* ]] || false
 }
 
-@test "results report the mode, ref, scripts and history commit, never the SQL, then clean the work dir" {
+@test "results report the mode, commit, scripts and history commit, never the SQL, then clean the work dir" {
   prepare_fetched_repo
   run_step prepare_migrations
   echo "0123456789abcdef" > "$MIGRATIONS_DIR/history_commit"
   echo "CREATE LOGIN x WITH PASSWORD = 'secret';" > "$MIGRATIONS_DIR/preview.sql"
   run_step write_migration_results
   [ "$status" -eq 0 ]
-  run grep -c 'np service action update --results {"mode":"apply","ref":"v1.0.0","scripts":\["01_create_t1.sql","02_alter_t1.sql"\],"history_commit":"0123456789abcdef"}$' "$MOCK_LOG"
+  run grep -c 'np service action update --results {"mode":"apply","commit":"0123456789abcdef0123456789abcdef01234567","scripts":\["01_create_t1.sql","02_alter_t1.sql"\],"history_commit":"0123456789abcdef"}$' "$MOCK_LOG"
   [ "$output" = "1" ]
   [ ! -d "$MIGRATIONS_DIR" ]
 }
@@ -541,18 +536,10 @@ MOCK
   chmod +x "$MOCK_BIN/mise"
 }
 
-@test "repository urls with .git, a trailing slash or the ssh form resolve to org/repo" {
-  for url in "https://github.com/My-Org/abc-databases.git" "https://github.com/My-Org/abc-databases/" "git@github.com:My-Org/abc-databases.git"; do
-    run bash -c "source '$DB_SERVICE_PATH/scripts/aws/lib'; source '$DB_SERVICE_PATH/scripts/aws/migrations_lib'; github_repository_of '$url'"
-    [ "$status" -eq 0 ]
-    [ "$output" = "My-Org/abc-databases" ]
-  done
-}
-
 @test "a database_directory parameter replaces the database name as the scripts directory" {
   mkdir -p "$FIXTURE_REPO/qas/custom_dir"
   printf 'SELECT 1;\n' > "$FIXTURE_REPO/qas/custom_dir/01_custom.sql"
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","database_directory":"custom_dir","mode":"preview"}'
+  set_migration_parameters '{"mode":"preview","database_directory":"custom_dir"}'
   run_step fetch_migrations
   [ "$status" -eq 0 ]
   run_step prepare_migrations
@@ -561,14 +548,14 @@ MOCK
 }
 
 @test "preview results carry an empty history commit" {
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"preview"}'
+  set_migration_parameters '{"mode":"preview"}'
   run_step fetch_migrations
   [ "$status" -eq 0 ]
   run_step prepare_migrations
   [ "$status" -eq 0 ]
   run_step write_migration_results
   [ "$status" -eq 0 ]
-  run grep -c 'np service action update --results {"mode":"preview","ref":"v1.0.0","scripts":\["01_create_t1.sql","02_alter_t1.sql"\],"history_commit":""}$' "$MOCK_LOG"
+  run grep -c 'np service action update --results {"mode":"preview","commit":"0123456789abcdef0123456789abcdef01234567","scripts":\["01_create_t1.sql","02_alter_t1.sql"\],"history_commit":""}$' "$MOCK_LOG"
   [ "$output" = "1" ]
 }
 

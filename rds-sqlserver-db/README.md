@@ -68,11 +68,12 @@ in `nullplatform/rds-sqlserver/<service slug>-<service id>/migrator`. Services
 created before this action get the user on their next `update`; until then the
 action asks for one.
 
-The repository must be the application's own `<org>/<sigla>-databases`, where
-the sigla is the namespace slug up to its first `-` (namespace `abcd-payments`
-→ `abcd-databases`). Any other repository is refused before GitHub is called,
-so one application cannot read or move another's scripts. It follows this
-layout:
+The scripts always come from the `main` branch of the application's own
+`<org>/<sigla>-databases` repository. The sigla is the namespace slug up to its
+first `-` (namespace `abcd-payments` → `abcd-databases`), and the org is
+`migrations_github_org` in `values.yaml`, or the only org the agent has a
+GitHub App for. The environment directory is the service's `environment`
+dimension. The repository follows this layout:
 
 ```
 <environment>/<database>/NN_description.sql   pending
@@ -81,19 +82,15 @@ layout:
 
 | Parameter | Meaning |
 |---|---|
-| `repository_url` | `https://github.com/<org>/<sigla>-databases` |
-| `ref` | tag or branch to read the scripts from |
-| `environment_directory` | e.g. `dev`, `qas`, `prd` |
-| `database_directory` | defaults to the database name |
 | `mode` | `preview` validates and prints the SQL; `apply` runs it |
-| `history_branch` | branch that receives `history/`; defaults to the repository's default branch |
+| `database_directory` | defaults to the database name |
 
 `apply` runs the pending scripts in name order, then moves them to
-`history/<name>_<ref>_<timestamp>.sql` on `history_branch` in a single commit.
-Each script is one changeset, split into batches on `GO` lines only. The
-changeset id is `<script>_<ref>`, or `<script>_<timestamp>` with `runOnChange`
-in `dev`, so re-running a tag skips what it already applied. The move to
-`history/` is what keeps a script from running again under a new tag: if it
+`history/<name>_<commit>_<timestamp>.sql` on `main` in a single commit. Each
+script is one changeset, split into batches on `GO` lines only. The changeset
+id is `<script>_<commit>`, or `<script>_<timestamp>` with `runOnChange` in
+`dev`, so re-running the same commit skips what it already applied. The move to
+`history/` is what keeps a script from running again after a new commit: if it
 fails, the action lists the scripts to move by hand.
 
 `GRANT CONNECT` is rejected in every environment; `DROP`, `TRUNCATE` and

@@ -7,7 +7,8 @@ setup_migrations_env() {
   setup_mock_bin
 
   export SERVICE_PATH="$DB_SERVICE_PATH"
-  export VALUES="$DB_SERVICE_PATH/values.yaml"
+  export VALUES="$BATS_TEST_TMPDIR/values.yaml"
+  printf 'migrations_github_org: "My-Org"\n' > "$VALUES"
   export OUTPUT_DIR="$BATS_TEST_TMPDIR/work"
   mkdir -p "$OUTPUT_DIR"
   export SERVER_HOSTNAME="db.example.rds.amazonaws.com"
@@ -32,7 +33,7 @@ setup_migrations_env() {
   printf 'CREATE TABLE d1 (id INT);\n' > "$FIXTURE_REPO/dev/app_42/01_dev.sql"
   export FIXTURE_REPO
 
-  set_migration_parameters '{"repository_url":"https://github.com/My-Org/abc-databases","ref":"v1.0.0","environment_directory":"qas","mode":"apply"}'
+  set_migration_parameters '{"mode":"apply"}'
 
   make_step_mock
   make_curl_mock
@@ -43,7 +44,7 @@ setup_migrations_env() {
 }
 
 set_migration_parameters() {
-  CONTEXT=$(jq -nc --argjson parameters "$1" '{service: {id: "svc-1"}, tags: {namespace: "abc-core"}, parameters: $parameters}')
+  CONTEXT=$(jq -nc --argjson parameters "$1" --arg environment "${2:-qas}" '{service: {id: "svc-1", dimensions: {environment: $environment}}, tags: {namespace: "abc-core"}, parameters: $parameters}')
   export CONTEXT
 }
 
@@ -107,9 +108,6 @@ case "\$method \$url" in
     case "\$body" in *'"contents":"write"'*) status="\${CURL_WRITE_TOKEN_STATUS:-\$status}" ;; esac
     [ "\$status" = "201" ] && printf '{"token": "$TEST_TOKEN"}\n%s' "\$status" || printf '{"message": "The permissions requested are not granted to this installation."}\n%s' "\$status"
     ;;
-  "GET https://api.github.com/repos/"*)
-    printf '{"default_branch": "master"}\n200'
-    ;;
   *)
     echo "curl mock: unexpected request \$method \$url" >&2
     exit 22
@@ -172,7 +170,7 @@ case "\$sub" in
     left=\$(cat "$PUSH_FAILURES_FILE")
     if [ "\$left" -gt 0 ]; then
       echo \$((left - 1)) > "$PUSH_FAILURES_FILE"
-      echo "! [rejected] HEAD -> master (fetch first)" >&2
+      echo "! [rejected] HEAD -> main (fetch first)" >&2
       exit 1
     fi
     ;;
@@ -241,5 +239,5 @@ prepare_fetched_repo() {
   export MIGRATIONS_DIR="$OUTPUT_DIR/migrations"
   mkdir -p "$MIGRATIONS_DIR/repo"
   cp -R "$FIXTURE_REPO/." "$MIGRATIONS_DIR/repo/"
-  echo "${1:-master}" > "$MIGRATIONS_DIR/history_branch"
+  echo "0123456789abcdef0123456789abcdef01234567" > "$MIGRATIONS_DIR/commit"
 }

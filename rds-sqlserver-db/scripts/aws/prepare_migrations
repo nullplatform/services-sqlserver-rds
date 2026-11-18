@@ -23,7 +23,7 @@ for file in "$SOURCE_DIR"/*.sql; do
 done
 
 if [ ! -s "${MIGRATIONS_DIR}/pending.txt" ]; then
-  die "no pending scripts in ${SCRIPTS_PATH} at ${MIGRATIONS_REF}: add NN_description.sql files there (scripts under history/ already ran)"
+  die "no pending scripts in ${SCRIPTS_PATH} at ${MIGRATIONS_BRANCH}: add NN_description.sql files there (scripts under history/ already ran)"
 fi
 
 echo "Pending scripts in ${SCRIPTS_PATH}:"
@@ -64,7 +64,7 @@ if [ "$ENVIRONMENT_DIRECTORY" = "dev" ]; then
   ID_SUFFIX="$TIMESTAMP"
   RUN_ON_CHANGE=true
 else
-  ID_SUFFIX=$(printf '%s' "$MIGRATIONS_REF" | tr '/' '-')
+  ID_SUFFIX=$(migrations_commit_label) || die "could not read the commit the scripts were cloned from"
   RUN_ON_CHANGE=false
 fi
 
