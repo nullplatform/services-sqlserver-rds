@@ -7,6 +7,7 @@ source "$SCRIPT_DIR/migrations_lib"
 
 load_migration_parameters
 
+COMMIT=$(cat "${MIGRATIONS_DIR}/commit")
 HISTORY_COMMIT=""
 if [ -f "${MIGRATIONS_DIR}/history_commit" ]; then
   HISTORY_COMMIT=$(cat "${MIGRATIONS_DIR}/history_commit")
@@ -14,12 +15,12 @@ fi
 
 RESULTS=$(jq -nc \
   --arg mode "$MIGRATIONS_MODE" \
-  --arg ref "$MIGRATIONS_REF" \
+  --arg commit "$COMMIT" \
   --arg history_commit "$HISTORY_COMMIT" \
   --rawfile scripts "${MIGRATIONS_DIR}/pending.txt" \
   '{
     mode: $mode,
-    ref: $ref,
+    commit: $commit,
     scripts: ($scripts | split("\n") | map(select(length > 0))),
     history_commit: $history_commit
   }')
@@ -27,4 +28,4 @@ RESULTS=$(jq -nc \
 np service action update --results "$RESULTS"
 
 rm -rf "$MIGRATIONS_DIR"
-echo "Migrations ${MIGRATIONS_MODE} finished for ${SCRIPTS_PATH} at ${MIGRATIONS_REF}."
+echo "Migrations ${MIGRATIONS_MODE} finished for ${SCRIPTS_PATH} at ${MIGRATIONS_BRANCH} ${COMMIT:0:12}."
