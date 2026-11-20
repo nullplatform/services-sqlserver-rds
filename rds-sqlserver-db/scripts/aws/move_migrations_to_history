@@ -1,4 +1,8 @@
 #!/bin/bash
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  bash "${BASH_SOURCE[0]}" || exit 1
+  return 0
+fi
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
