@@ -99,8 +99,61 @@ because go-sqlcmd has changed how `--encrypt-connection` is spelled between
 releases; keeping the flags in one place makes that a configuration fix rather
 than a code change.
 
-## Setup
+## Install in your organization
 
-IAM in [`specs/requirements/aws`](specs/requirements/aws), platform
-registration in [`specs/install/aws`](specs/install/aws). See
-[`specs/install/README.md`](specs/install/README.md).
+The service is published once as the package `np-rds-sqlserver-db` (specification "RDS SQL Server DB"), visible to every organization. You do not copy its specs: you install the package and use it read-only. How installing a package works, how it coexists with a copy you registered, how to upgrade, and when to fork instead are in the [package installation guide](https://docs.nullplatform.com/docs/packages/install); this section has what is specific to this service.
+
+Already registered a copy from the former `specs/install`? It keeps working: it called tofu-modules' `service_definition` on specs that stay in every release, and the package installs next to it, as the guide explains. If you sourced that directory as a module, pin its `?ref` to a release that still has it.
+
+Installing it touches the same three layers as registering a service yourself, and only the nullplatform layer changes:
+
+| Layer | What | Module |
+|---|---|---|
+| infrastructure (AWS credentials) | The IAM role the service assumes, with access to the state bucket | [`specs/requirements/aws`](specs/requirements/aws) |
+| nullplatform (nullplatform API key) | The installation of the package and the agent channel | tofu-modules' `service_package_installation` |
+| bindings | The role under selector `rds-sqlserver-db` in your IAM provider | your `aws-iam-configuration` provider |
+
+Pick ONE release of this repository (the latest is on its [releases page](https://github.com/nullplatform/services-sqlserver-rds/releases)) and use its version in both places below: the IAM role is the one the worker of that same release expects. Both services of this repository share the release, so install them at the same version.
+
+```hcl
+# ── infrastructure layer ─────────────────────────────────────────────
+module "rds_sqlserver_db_requirements" {
+  source            = "git::https://github.com/nullplatform/services-sqlserver-rds.git//rds-sqlserver-db/specs/requirements/aws?ref=vX.Y.Z"
+  cluster_name      = "<nullplatform agent cluster>"
+  state_bucket_name = "<existing S3 bucket for the tofu state>"
+}
+
+# The agent role must be allowed to assume it: add it to the assume_role_arns
+# of tofu-modules' infrastructure/aws/iam/agent.
+#   assume_role_arns = [..., module.rds_sqlserver_db_requirements.permissions_role_arn]
+
+# ── nullplatform layer ───────────────────────────────────────────────
+# For a service the installation is the whole nullplatform side, channel included.
+module "rds_sqlserver_db" {
+  source = "git::https://github.com/nullplatform/tofu-modules.git//nullplatform/service_package_installation?ref=v9.16.0"
+
+  nrn                  = var.nrn
+  package_slug         = "np-rds-sqlserver-db"
+  package_version      = "X.Y.Z" # the same release, without the v
+  agent_tags_selectors = { cluster = "runtime" } # must match the agent's TAGS
+}
+# Keeping channels in a separate bindings layer instead? Use
+# nullplatform/package_installation here and service_definition_agent_association
+# there, with package_slug = "np-rds-sqlserver-db".
+
+# ── bindings layer ───────────────────────────────────────────────────
+# One aws-iam-configuration per NRN and dimensions, at the account level: add
+# the entry to the list your IAM provider already has. Both services of this
+# repository go in the SAME provider, one selector each.
+#   { selector = "rds-sqlserver-db", arn = module.rds_sqlserver_db_requirements.permissions_role_arn }
+```
+
+**The state bucket.** Set `RDS_SQL_SERVER_S3_STATE_BUCKET` on the worker (a per-package env patch in tofu-modules' `nullplatform/agent`) to the name of an existing S3 bucket, and pass the same name to the requirements module as `state_bucket_name`; see "Terraform state" above for the layout. Both services share the bucket. The bucket must already exist: the service never creates or deletes it, and without the variable every action fails before touching AWS.
+
+The service assumes the role it finds under selector `rds-sqlserver-db` in the IAM provider closest to its NRN. To upgrade, move the release in both layers: `ref` of the requirements module and `package_version` of the installation. See tofu-modules' [`service_package_installation`](https://github.com/nullplatform/tofu-modules/tree/main/nullplatform/service_package_installation) for its inputs and outputs. The channel it creates subscribes to `service` and `telemetry` notifications; without `telemetry` the service shows no metrics.
+
+Prerequisites: an agent whose `TAGS` match the channel's `tags_selectors`, with `public.ecr.aws/nullplatform/*` in `worker.allowedRegistries` and `np-rds-sqlserver-db` in its `worker_orchestrated_packages` (the worker then runs with the agent's identity, the one the role trusts); it also needs an active `rds-sqlserver` service with matching dimensions in the same namespace.
+
+## How the package is published
+
+Every release publishes a new revision of the package from this repository, in the same run that pushes the worker image ([`.github/workflows/release.yml`](../.github/workflows/release.yml)): the `publish-package` job applies [`rds-sqlserver-db/publish`](publish), a stack on tofu-modules' `service_package_publish`, which pins this tag's specs and the image by digest. The package version is the release tag, as for the image. The stack keeps its state where the organization secrets `PACKAGE_STATE_AWS_ACCOUNT_ID`, `PACKAGE_TFSTATE_BUCKET` and `PACKAGE_TFSTATE_REGION` point; the state role is `github-actions-<repository>-package-state` in that account, by convention.
