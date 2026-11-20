@@ -128,6 +128,12 @@ migrations_commit_label() {
 }
 fi
 
+if ! type -t has_pending_migrations >/dev/null 2>&1; then
+has_pending_migrations() {
+  [ -s "${MIGRATIONS_DIR}/pending.txt" ]
+}
+fi
+
 if ! type -t strip_sql_comments >/dev/null 2>&1; then
 strip_sql_comments() {
   awk '

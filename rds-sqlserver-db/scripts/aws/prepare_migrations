@@ -26,8 +26,9 @@ for file in "$SOURCE_DIR"/*.sql; do
   echo "$name" >> "${MIGRATIONS_DIR}/pending.txt"
 done
 
-if [ ! -s "${MIGRATIONS_DIR}/pending.txt" ]; then
-  die "no pending scripts in ${SCRIPTS_PATH} at ${MIGRATIONS_BRANCH}: add NN_description.sql files there (scripts under history/ already ran)"
+if ! has_pending_migrations; then
+  echo "No pending scripts in ${SCRIPTS_PATH} at ${MIGRATIONS_BRANCH} ($(migrations_commit_label)): nothing to apply. Scripts under history/ already ran."
+  exit 0
 fi
 
 echo "Pending scripts in ${SCRIPTS_PATH}:"

@@ -65,6 +65,11 @@ move_to_history() {
     return 0
   fi
 
+  if ! has_pending_migrations; then
+    echo "Nothing to move to history."
+    return 0
+  fi
+
   branch="$MIGRATIONS_BRANCH"
   token=$(mint_github_token "$GITHUB_REPOSITORY" write) \
     || fail_with_pending_scripts "could not get a write token for ${GITHUB_REPOSITORY}"
