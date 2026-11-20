@@ -10,6 +10,7 @@ setup() {
 @test "fetch clones main of the sigla repository with a read token scoped to it" {
   run_step fetch_migrations
   [ "$status" -eq 0 ]
+  [[ "$output" == *NEXT_STEP_RAN* ]] || false
   run grep -c 'curl-request POST https://api.github.com/app/installations/777/access_tokens {"repositories":\["abc-databases"\],"permissions":{"contents":"read"}}' "$MOCK_LOG"
   [ "$output" = "1" ]
   run grep -c "git clone --quiet --depth 1 --branch main https://github.com/My-Org/abc-databases.git $OUTPUT_DIR/migrations/repo auth=x-access-token:$TEST_TOKEN" "$MOCK_LOG"
@@ -102,6 +103,8 @@ setup() {
   run_step fetch_migrations
   [ "$status" -ne 0 ]
   [[ "$output" == *"repository My-Org/abc-databases does not exist, or GitHub App 123 is not installed on it"* ]] || false
+  [[ "$output" != *"Cloning"* ]] || false
+  [[ "$output" != *NEXT_STEP_RAN* ]] || false
   run grep -c "^git clone" "$MOCK_LOG"
   [ "$output" = "0" ]
 }
@@ -187,6 +190,7 @@ setup() {
   run_step fetch_migrations
   [ "$status" -ne 0 ]
   [[ "$output" == *"set migrations_github_org in values.yaml (the agent has GitHub Apps for: other-org,My-Org)"* ]] || false
+  [[ "$output" != *"Migrations: "* ]] || false
   run grep -c "^curl " "$MOCK_LOG"
   [ "$output" = "0" ]
 }

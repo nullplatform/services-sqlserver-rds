@@ -49,7 +49,7 @@ set_migration_parameters() {
 }
 
 run_step() {
-  run "$DB_SERVICE_PATH/scripts/aws/$1"
+  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/$1' && echo NEXT_STEP_RAN"
 }
 
 run_step_with_mocked_liquibase() {
@@ -60,7 +60,7 @@ run_step_with_mocked_liquibase() {
       export MSSQL_JDBC_JAR='$BATS_TEST_TMPDIR/mssql.jar'
     }
     export -f require_liquibase
-    '$DB_SERVICE_PATH/scripts/aws/$1'
+    source '$DB_SERVICE_PATH/scripts/aws/$1' && echo NEXT_STEP_RAN
   "
 }
 
