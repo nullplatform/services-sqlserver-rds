@@ -9,10 +9,12 @@ nullplatform service definitions for AWS RDS SQL Server:
   grants access to applications through the `connect` link.
 
 Each service directory is self-contained: `entrypoint/`, `workflows/`,
-`scripts/`, `sql/` and `specs/` are read directly by the nullplatform agent at
-runtime. `specs/requirements/aws/` and `specs/install/aws/` contain one-time
-setup Terraform, applied out-of-band by an account operator — see each
-service's own README and `specs/install/README.md`.
+`scripts/`, `sql/` and `specs/` are what its worker image runs, and `publish/`
+is the stack that publishes it as a global package on every release
+(`np-rds-sqlserver` and `np-rds-sqlserver-db`, both at the release version).
+`specs/requirements/aws/` is the one-time IAM setup an organization applies
+before installing the package; see each service's README, "Install in your
+organization".
 
 ## Why a repository per engine
 
@@ -120,7 +122,7 @@ policy.
 
 A service whose instance does not exist yet returns an empty series. A CloudWatch error fails the request instead of showing an empty graph.
 
-**Permissions to request.** The agent role itself needs `cloudwatch:GetMetricStatistics` on `*`: metrics run on the agent's credentials, never on the permissions role. `specs/requirements/aws` attaches that policy to `agent_role_arn` and `additional_agent_role_arns`; set `attach_metrics_policy_to_agent_roles = false` if the agent role is managed elsewhere. The `specs/install/aws` module subscribes the agent channel to `service` and `telemetry` notifications; without `telemetry` the service shows no metrics.
+**Permissions to request.** The agent role itself needs `cloudwatch:GetMetricStatistics` on `*`: metrics run on the agent's credentials, never on the permissions role. `specs/requirements/aws` attaches that policy to `agent_role_arn` and `additional_agent_role_arns`; set `attach_metrics_policy_to_agent_roles = false` if the agent role is managed elsewhere. The channel the package installation creates subscribes to `service` and `telemetry` notifications; without `telemetry` the service shows no metrics.
 
 The service has no logs: `log:*` notifications run `scripts/aws/read_logs`, which answers with no entries. Telemetry scripts print nothing but their result, since stdout is the response. Workflow overrides do not apply to telemetry.
 
