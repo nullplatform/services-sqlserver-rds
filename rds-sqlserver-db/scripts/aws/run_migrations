@@ -10,6 +10,12 @@ source "$SCRIPT_DIR/lib"
 source "$SCRIPT_DIR/migrations_lib"
 
 load_migration_parameters
+
+if ! has_pending_migrations; then
+  echo "Nothing to run on ${DB_NAME}."
+  exit 0
+fi
+
 require_liquibase
 
 CREDENTIALS=$(aws secretsmanager get-secret-value \

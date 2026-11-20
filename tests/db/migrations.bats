@@ -236,12 +236,32 @@ setup() {
   [ "$output" = '{"path":"stage/01_create_t1.sql","relativeToChangelogFile":true,"splitStatements":true,"endDelimiter":"\\nGO","stripComments":false,"encoding":"UTF-8"}' ]
 }
 
-@test "an empty script directory fails explaining that history holds what already ran" {
+@test "an empty script directory succeeds saying there is nothing to apply" {
   prepare_fetched_repo
   rm "$MIGRATIONS_DIR"/repo/qas/app_42/0*.sql
   run_step prepare_migrations
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"no pending scripts in qas/app_42 at main"* ]] || false
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No pending scripts in qas/app_42 at main (0123456789ab): nothing to apply"* ]] || false
+  [[ "$output" == *NEXT_STEP_RAN* ]] || false
+  [ ! -f "$MIGRATIONS_DIR/changelog.json" ]
+}
+
+@test "with nothing pending apply never touches the database nor the repository and reports no scripts" {
+  prepare_fetched_repo
+  rm "$MIGRATIONS_DIR"/repo/qas/app_42/0*.sql
+  run_step prepare_migrations
+  run_step_with_mocked_liquibase run_migrations
+  [ "$status" -eq 0 ]
+  [[ "$output" == *NEXT_STEP_RAN* ]] || false
+  run_step move_migrations_to_history
+  [ "$status" -eq 0 ]
+  [[ "$output" == *NEXT_STEP_RAN* ]] || false
+  run grep -cE "^(liquibase|aws|curl|git) " "$MOCK_LOG"
+  [ "$output" = "0" ]
+  run_step write_migration_results
+  [ "$status" -eq 0 ]
+  run grep -c 'np service action update --results {"mode":"apply","commit":"0123456789abcdef0123456789abcdef01234567","scripts":\[\],"history_commit":""}$' "$MOCK_LOG"
+  [ "$output" = "1" ]
 }
 
 @test "scripts not named NN_description.sql are listed and rejected" {
