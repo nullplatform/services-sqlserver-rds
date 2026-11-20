@@ -1,22 +1,21 @@
 name: release
 
-# One repo, TWO worker images (rds-sqlserver-server + rds-sqlserver-db), one
-# chained run: release-please cuts the version once, the release-publish-oci
-# chain builds/pushes/registers the SERVER image, and a matrixed job does the
-# same for every additional image against the same tag — both artifacts end up
-# in the release notes.
+# One repo, TWO services (rds-sqlserver-server + rds-sqlserver-db), each with
+# its worker image and its global package, one chained run: release-please cuts
+# the version once, the release-publish-oci chain builds/pushes/registers the
+# SERVER image and publishes its package, and a second call of the same chain
+# does the same for the DB against the same tag — both artifacts end up in the
+# release notes, both packages carry the release version. A third service is a
+# third call.
 #
 # Chained on purpose: release-please creates tags with GITHUB_TOKEN, and
 # GitHub never triggers workflows from bot-token events.
-#
-# The matrix is what keeps a third image from meaning a third copy of this
-# job: add an entry to the matrix include list and nothing else changes.
 #
 # Recovery / backfill: dispatch with existing_tag to publish + finalize a tag
 # that already exists.
 #
 # Configure: secrets AWS_ROLE_ARN_ECR_PUSH + ARTIFACT_NP_API_KEY, variable
-# NP_ARTIFACT_NRN.
+# NP_ARTIFACT_NRN; the package state secrets come from the organization.
 on:
   push:
     branches:
