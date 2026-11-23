@@ -40,4 +40,9 @@ module "publish" {
   service_path     = "rds-sqlserver-server"
   image_repository = "nullplatform/agent-plugins/services/rds-sqlserver-server"
   local_specs_path = abspath("${path.module}/..")
+
+  # The server exposes no link (its spec lists none): the database service is
+  # what applications connect to. Without this the module's default looks for
+  # specs/links/connect.json.tpl and the apply fails.
+  available_links = []
 }
