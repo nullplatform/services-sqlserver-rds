@@ -536,6 +536,25 @@ MOCK
   [ "$output" = "0" ]
 }
 
+@test "a multi-line environment dimension cannot smuggle a path past validation" {
+  set_migration_parameters '{"mode":"apply"}' $'qas\n../../x'
+  run_step fetch_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must be a single directory name"* ]] || false
+  run grep -c "^curl " "$MOCK_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "a multi-line namespace cannot smuggle characters past the sigla validation" {
+  CONTEXT=$(jq -c '.namespace.slug = "abc\n../x-core"' <<< "$CONTEXT")
+  export CONTEXT
+  run_step fetch_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot use"* ]] || false
+  run grep -c "^curl " "$MOCK_LOG"
+  [ "$output" = "0" ]
+}
+
 @test "preview results list the scripts that would run" {
   set_migration_parameters '{"mode":"preview"}'
   run_step fetch_migrations
