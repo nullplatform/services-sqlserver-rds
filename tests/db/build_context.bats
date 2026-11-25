@@ -27,7 +27,9 @@ MOCK
 #!/usr/bin/env bash
 echo "np \$*" >> "$MOCK_LOG"
 if [ "\$1 \$2" = "service read" ]; then
-  echo "\${SERVICE_READ_JSON:-{\"attributes\":{}}}"
+  json="\${SERVICE_READ_JSON:-}"
+  [ -n "\$json" ] || json='{"attributes":{}}'
+  echo "\$json"
   exit 0
 fi
 [ "\$1 \$2" = "provider list" ] || exit 0
