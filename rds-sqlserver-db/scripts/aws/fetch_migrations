@@ -38,11 +38,6 @@ reject_symlinks "${MIGRATIONS_DIR}/repo" "${GITHUB_REPOSITORY}@${MIGRATIONS_BRAN
 git -C "${MIGRATIONS_DIR}/repo" rev-parse HEAD > "${MIGRATIONS_DIR}/commit" \
   || die "could not read the commit of ${GITHUB_REPOSITORY}@${MIGRATIONS_BRANCH}"
 
-if [ "$MIGRATIONS_MODE" = "apply" ]; then
-  echo "Checking that executed scripts can be moved to history before touching the database..."
-  mint_github_token "$GITHUB_REPOSITORY" write > /dev/null
-fi
-
 if [ ! -d "${MIGRATIONS_DIR}/repo/${SCRIPTS_PATH}" ]; then
   die "directory ${SCRIPTS_PATH} does not exist in ${GITHUB_REPOSITORY}@${MIGRATIONS_BRANCH}"
 fi

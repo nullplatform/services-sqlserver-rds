@@ -8,7 +8,7 @@
 * metrics for the SQL Server instance in the service's metrics view: CPU, connections, free storage, freeable memory, read and write IOPS and latency
 * the requirements module grants the agent role `cloudwatch:GetMetricStatistics` so metrics show
 * the install module subscribes the agent channel to `telemetry` notifications
-* `rds-sqlserver-db` has a `run-migrations` action that runs the pending scripts of the application's `<sigla>-databases` repository with Liquibase and moves them to `history/`
+* `rds-sqlserver-db` has a `run-migrations` action that runs the scripts of the application's `<sigla>-databases` repository that have not run yet on the database, with Liquibase
 * each `rds-sqlserver-db` database gets a migrations user that is `db_owner` of that database only
 * `rds-sqlserver-db` has a `migrations_directory` attribute that names its scripts directory in the repository, the database name when empty
 

@@ -106,7 +106,6 @@ case "\$method \$url" in
     ;;
   "POST https://api.github.com/app/installations/"*"/access_tokens")
     status="\${CURL_TOKEN_STATUS:-201}"
-    case "\$body" in *'"contents":"write"'*) status="\${CURL_WRITE_TOKEN_STATUS:-\$status}" ;; esac
     [ "\$status" = "201" ] && printf '{"token": "$TEST_TOKEN"}\n%s' "\$status" || printf '{"message": "The permissions requested are not granted to this installation."}\n%s' "\$status"
     ;;
   *)
@@ -119,8 +118,6 @@ MOCK
 }
 
 make_git_mock() {
-  PUSH_FAILURES_FILE="$BATS_TEST_TMPDIR/push-failures"
-  echo "${GIT_PUSH_FAILURES:-0}" > "$PUSH_FAILURES_FILE"
   cat > "$MOCK_BIN/git" <<MOCK
 #!/usr/bin/env bash
 auth=""
@@ -128,11 +125,9 @@ if [ -n "\${GIT_CONFIG_VALUE_0:-}" ]; then
   auth=\$(printf '%s' "\${GIT_CONFIG_VALUE_0#AUTHORIZATION: basic }" | base64 -d 2>/dev/null)
 fi
 echo "git \$* auth=\$auth" >> "$MOCK_LOG"
-dir="."
 while [ \$# -gt 0 ]; do
   case "\$1" in
-    -C) dir="\$2"; shift 2 ;;
-    -c) shift 2 ;;
+    -C|-c) shift 2 ;;
     *) break ;;
   esac
 done
@@ -152,29 +147,6 @@ case "\$sub" in
     mkdir -p "\$dest" && cp -R "$FIXTURE_REPO/." "\$dest/"
     ;;
   rev-parse) echo "0123456789abcdef0123456789abcdef01234567" ;;
-  add)
-    for arg in "\$@"; do
-      case "\$arg" in -*) ;; *) [ -e "\$dir/\$arg" ] || { echo "fatal: pathspec \$arg did not match" >&2; exit 128; } ;; esac
-    done
-    ;;
-  rm)
-    for arg in "\$@"; do
-      case "\$arg" in -*) ;; *) rm -f "\$dir/\$arg" ;; esac
-    done
-    ;;
-  diff)
-    [ "\${GIT_NOTHING_STAGED:-0}" = "1" ] && exit 0
-    exit 1
-    ;;
-  commit) ;;
-  push)
-    left=\$(cat "$PUSH_FAILURES_FILE")
-    if [ "\$left" -gt 0 ]; then
-      echo \$((left - 1)) > "$PUSH_FAILURES_FILE"
-      echo "! [rejected] HEAD -> main (fetch first)" >&2
-      exit 1
-    fi
-    ;;
   *) echo "git mock: unexpected subcommand \$sub" >&2; exit 1 ;;
 esac
 MOCK
@@ -221,6 +193,23 @@ done
 if [ -f "$BATS_TEST_TMPDIR/liquibase-fail-on" ] && [ "\$command" = "\$(cat "$BATS_TEST_TMPDIR/liquibase-fail-on")" ]; then
   echo "liquibase: \$command failed" >&2
   exit 1
+fi
+if [ "\$command" = "status" ]; then
+  if [ -f "$BATS_TEST_TMPDIR/liquibase-status" ]; then
+    cat "$BATS_TEST_TMPDIR/liquibase-status"
+    exit 0
+  fi
+  applied="$BATS_TEST_TMPDIR/liquibase-applied"
+  [ -f "\$applied" ] || applied=/dev/null
+  pending=\$(jq -r '.databaseChangeLog[].changeSet | "\(.logicalFilePath)::\(.id)::\(.author)"' "\$search/\$changelog" | grep -vxF -f "\$applied" || true)
+  count=\$(grep -c . <<< "\$pending" || true)
+  case "\$count" in
+    0) echo "@jdbc:sqlserver://db is up to date" ;;
+    1) echo "1 changeset has not been applied to @jdbc:sqlserver://db" ;;
+    *) echo "\$count changesets have not been applied to @jdbc:sqlserver://db" ;;
+  esac
+  [ "\$count" -eq 0 ] || sed 's/^/     /' <<< "\$pending"
+  exit 0
 fi
 [ -n "\$output_file" ] && echo "CREATE TABLE t1 (id INT);" > "\$output_file"
 exit 0

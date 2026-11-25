@@ -22,7 +22,7 @@
             },
             {
               "const": "apply",
-              "title": "Apply: run the scripts and move them to history on main"
+              "title": "Apply: run the scripts that have not run yet"
             }
           ]
         }
@@ -46,9 +46,6 @@
           "items": {
             "type": "string"
           }
-        },
-        "history_commit": {
-          "type": "string"
         }
       }
     },

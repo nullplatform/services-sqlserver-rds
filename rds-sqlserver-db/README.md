@@ -78,27 +78,24 @@ attribute, or the database name when it is empty. The repository follows this
 layout:
 
 ```
-<environment>/<migrations_directory>/NN_description.sql   pending
-<environment>/<migrations_directory>/history/             already ran
+<environment>/<migrations_directory>/NN_description.sql
 ```
 
 The only parameter is `mode`: `preview` validates and prints the SQL; `apply`
 runs it.
 
-`apply` runs the pending scripts in name order, then moves them to
-`history/<name>_<commit>_<timestamp>.sql` on `main` in a single commit. Each
-script is one changeset, split into batches on `GO` lines only. The changeset
-id is `<script>_<commit>`, or `<script>_<timestamp>` with `runOnChange` in
-`dev`, so re-running the same commit skips what it already applied. The move to
-`history/` is what keeps a script from running again after a new commit: if it
-fails, the action lists the scripts to move by hand.
+Scripts stay in the repository after they run: Liquibase records each one in
+the database's `DATABASECHANGELOG` and `apply` runs, in name order, only those
+not recorded yet. Each script is one changeset whose id is the script name,
+split into batches on `GO` lines only. Editing a script that already ran fails
+validation, except in `dev`, where it runs again (`runOnChange`). Renaming a
+script that already ran makes it run again.
 
 `GRANT CONNECT` is rejected in every environment; `DROP`, `TRUNCATE` and
 `SELECT *` everywhere except `dev`. This is a guardrail against mistakes, not a
 security boundary: dynamic SQL gets past it, and `db_owner` can do all of it.
 
-`apply` checks that the App can write to the repository before it touches the
-database. Liquibase runs with an empty environment, so `${...}` in a script
+Liquibase runs with an empty environment, so `${...}` in a script
 cannot expand the agent's credentials. Repositories with symbolic links are
 rejected. The generated SQL is printed in the action log but never stored in
 its results.
@@ -106,8 +103,8 @@ its results.
 A run killed mid-update leaves `DATABASECHANGELOGLOCK` held, and the next run
 waits for it. Clear it with `liquibase release-locks` as the migrations user.
 
-The repository is read and written with the agent's GitHub App
-(`NP_GITHUB_APPS`), which needs **Contents: Read and write** on it. Java 21,
+The repository is read with the agent's GitHub App (`NP_GITHUB_APPS`), which
+needs **Contents: Read** on it. Java 21,
 Liquibase, the `mssql-jdbc` driver and `step` (to sign the App's JWT) are
 installed at pinned versions with `mise` on first use.
 

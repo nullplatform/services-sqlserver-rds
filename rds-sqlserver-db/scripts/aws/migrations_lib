@@ -127,9 +127,25 @@ migrations_commit_label() {
 }
 fi
 
-if ! type -t has_pending_migrations >/dev/null 2>&1; then
-has_pending_migrations() {
-  [ -s "${MIGRATIONS_DIR}/pending.txt" ]
+if ! type -t has_migration_scripts >/dev/null 2>&1; then
+has_migration_scripts() {
+  [ -s "${MIGRATIONS_DIR}/scripts.txt" ]
+}
+fi
+
+if ! type -t pending_changesets >/dev/null 2>&1; then
+pending_changesets() {
+  local status="$1" expected
+
+  if grep -Eq ' is up to date$' <<< "$status"; then
+    expected=0
+  else
+    expected=$(grep -Eo '^[0-9]+ changesets? ha(s|ve) not been applied' <<< "$status" | cut -d' ' -f1)
+    [ -n "$expected" ] || return 1
+  fi
+
+  sed -n "s|^[[:space:]]*${SCRIPTS_PATH}/changelog::\(.*\)::nullplatform\$|\1.sql|p" <<< "$status" > "${MIGRATIONS_DIR}/pending.txt"
+  [ "$(grep -c . "${MIGRATIONS_DIR}/pending.txt")" -eq "$expected" ]
 }
 fi
 

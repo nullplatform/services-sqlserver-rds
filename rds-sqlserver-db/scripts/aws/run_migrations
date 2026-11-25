@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/migrations_lib"
 
 load_migration_parameters
 
-if ! has_pending_migrations; then
+if ! has_migration_scripts; then
   echo "Nothing to run on ${DB_NAME}."
   exit 0
 fi
@@ -52,8 +52,17 @@ liquibase() {
 echo "Validating the changelog against ${DB_NAME} on ${SERVER_HOSTNAME} as ${MIGRATOR_USER}..."
 liquibase validate || die "liquibase validate failed: see the error above"
 
-echo "Changesets not yet applied:"
-liquibase status --verbose || die "liquibase status failed: see the error above"
+STATUS=$(liquibase status --verbose) || die "liquibase status failed: see the error above"
+pending_changesets "$STATUS" \
+  || die "could not read the pending changesets from liquibase status: ${STATUS}"
+
+if ! [ -s "${MIGRATIONS_DIR}/pending.txt" ]; then
+  echo "Nothing to apply: every script in ${SCRIPTS_PATH} already ran on ${DB_NAME}."
+  exit 0
+fi
+
+echo "Scripts not yet applied on ${DB_NAME}:"
+sed 's/^/  - /' "${MIGRATIONS_DIR}/pending.txt"
 
 echo "SQL that the update runs:"
 liquibase update-sql --output-file="${MIGRATIONS_DIR}/preview.sql" \
@@ -63,7 +72,7 @@ cat "${MIGRATIONS_DIR}/preview.sql"
 if [ "$MIGRATIONS_MODE" = "apply" ]; then
   echo "Applying the changesets..."
   liquibase update \
-    || die "liquibase update failed: changesets that ran before the failure are recorded in DATABASECHANGELOG and are skipped on retry; nothing was moved to history"
+    || die "liquibase update failed: changesets that ran before the failure are recorded in DATABASECHANGELOG and are skipped on retry"
   echo "Changesets applied."
 else
   echo "Preview mode: nothing was applied."

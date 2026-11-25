@@ -28,28 +28,17 @@ setup() {
   [ "$output" = "1" ]
 }
 
-@test "preview only ever asks GitHub for a read token" {
+@test "preview and apply only ever ask GitHub for a read token" {
   set_migration_parameters '{"mode":"preview"}'
+  run_step fetch_migrations
+  [ "$status" -eq 0 ]
+  set_migration_parameters '{"mode":"apply"}'
   run_step fetch_migrations
   [ "$status" -eq 0 ]
   run grep -c '"contents":"write"' "$MOCK_LOG"
   [ "$output" = "0" ]
-}
-
-@test "apply checks the write token before touching the database" {
-  run_step fetch_migrations
-  [ "$status" -eq 0 ]
-  run grep -c '^curl-request POST .*"permissions":{"contents":"write"}' "$MOCK_LOG"
-  [ "$output" = "1" ]
-}
-
-@test "apply stops before the database when the App cannot write to the repository" {
-  export CURL_WRITE_TOKEN_STATUS=422
-  run_step fetch_migrations
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"GitHub refused a contents:write token for My-Org/abc-databases: The permissions requested are not granted to this installation"* ]] || false
-  run grep -c "^git clone" "$MOCK_LOG"
-  [ "$output" = "1" ]
+  run grep -c '^curl-request POST .*"permissions":{"contents":"read"}' "$MOCK_LOG"
+  [ "$output" = "2" ]
 }
 
 @test "a repository containing symbolic links is rejected before any script is read" {
@@ -76,7 +65,7 @@ setup() {
   run grep -c "^git .*$TEST_TOKEN.* auth=" "$MOCK_LOG"
   [ "$output" = "0" ]
   run grep -c "curl-stdin-auth $TEST_JWT" "$MOCK_LOG"
-  [ "$output" = "4" ]
+  [ "$output" = "2" ]
   run grep -c "curl-stdin-auth $TEST_TOKEN" "$MOCK_LOG"
   [ "$output" = "0" ]
 }
@@ -202,30 +191,29 @@ setup() {
   [[ "$output" == *"mode 'force' is not valid"* ]] || false
 }
 
-@test "prepare picks pending scripts in order and skips history and old changelogs" {
+@test "prepare lists every script in order and skips subdirectories and old changelogs" {
   prepare_fetched_repo
   run_step prepare_migrations
   [ "$status" -eq 0 ]
-  run cat "$MIGRATIONS_DIR/pending.txt"
+  run cat "$MIGRATIONS_DIR/scripts.txt"
   [ "$output" = $'01_create_t1.sql\n02_alter_t1.sql' ]
 }
 
-@test "outside dev the changeset id carries the commit and scripts never re-run on change" {
+@test "outside dev the changeset id is the script name and scripts never re-run on change" {
   prepare_fetched_repo
   run_step prepare_migrations
   [ "$status" -eq 0 ]
   run jq -c '[.databaseChangeLog[].changeSet | {id, runOnChange, logicalFilePath}]' "$MIGRATIONS_DIR/changelog.json"
-  [ "$output" = '[{"id":"01_create_t1_0123456789ab","runOnChange":false,"logicalFilePath":"qas/app_42/changelog"},{"id":"02_alter_t1_0123456789ab","runOnChange":false,"logicalFilePath":"qas/app_42/changelog"}]' ]
+  [ "$output" = '[{"id":"01_create_t1","runOnChange":false,"logicalFilePath":"qas/app_42/changelog"},{"id":"02_alter_t1","runOnChange":false,"logicalFilePath":"qas/app_42/changelog"}]' ]
 }
 
-@test "in dev the changeset id carries the run timestamp and runs on change" {
+@test "in dev the changeset id is the script name too and runs on change" {
   set_migration_parameters '{"mode":"apply"}' dev
   prepare_fetched_repo
   run_step prepare_migrations
   [ "$status" -eq 0 ]
-  timestamp=$(cat "$MIGRATIONS_DIR/timestamp")
   run jq -r '.databaseChangeLog[0].changeSet | "\(.id) \(.runOnChange)"' "$MIGRATIONS_DIR/changelog.json"
-  [ "$output" = "01_dev_${timestamp} true" ]
+  [ "$output" = "01_dev true" ]
 }
 
 @test "scripts are split only on GO lines and keep their comments" {
@@ -241,26 +229,23 @@ setup() {
   rm "$MIGRATIONS_DIR"/repo/qas/app_42/0*.sql
   run_step prepare_migrations
   [ "$status" -eq 0 ]
-  [[ "$output" == *"No pending scripts in qas/app_42 at main (0123456789ab): nothing to apply"* ]] || false
+  [[ "$output" == *"No scripts in qas/app_42 at main (0123456789ab): nothing to apply."* ]] || false
   [[ "$output" == *NEXT_STEP_RAN* ]] || false
   [ ! -f "$MIGRATIONS_DIR/changelog.json" ]
 }
 
-@test "with nothing pending apply never touches the database nor the repository and reports no scripts" {
+@test "with no scripts apply never touches the database nor the repository and reports no scripts" {
   prepare_fetched_repo
   rm "$MIGRATIONS_DIR"/repo/qas/app_42/0*.sql
   run_step prepare_migrations
   run_step_with_mocked_liquibase run_migrations
   [ "$status" -eq 0 ]
   [[ "$output" == *NEXT_STEP_RAN* ]] || false
-  run_step move_migrations_to_history
-  [ "$status" -eq 0 ]
-  [[ "$output" == *NEXT_STEP_RAN* ]] || false
   run grep -cE "^(liquibase|aws|curl|git) " "$MOCK_LOG"
   [ "$output" = "0" ]
   run_step write_migration_results
   [ "$status" -eq 0 ]
-  run grep -c 'np service action update --results {"mode":"apply","commit":"0123456789abcdef0123456789abcdef01234567","scripts":\[\],"history_commit":""}$' "$MOCK_LOG"
+  run grep -c 'np service action update --results {"mode":"apply","commit":"0123456789abcdef0123456789abcdef01234567","scripts":\[\]}$' "$MOCK_LOG"
   [ "$output" = "1" ]
 }
 
@@ -410,113 +395,71 @@ setup() {
   [ "$output" = "4" ]
 }
 
-@test "a failed update says what was recorded and that nothing moved to history" {
+@test "a failed update says that what ran is recorded and skipped on retry" {
   echo "update" > "$BATS_TEST_TMPDIR/liquibase-fail-on"
   prepare_fetched_repo
   run_step prepare_migrations
   run_step_with_mocked_liquibase run_migrations
   [ "$status" -ne 0 ]
-  [[ "$output" == *"recorded in DATABASECHANGELOG and are skipped on retry; nothing was moved to history"* ]] || false
+  [[ "$output" == *"recorded in DATABASECHANGELOG and are skipped on retry"* ]] || false
 }
 
-@test "preview never asks GitHub for a write token" {
-  set_migration_parameters '{"mode":"preview"}'
+@test "scripts that already ran are skipped and only the pending ones are applied and reported" {
+  echo "qas/app_42/changelog::01_create_t1::nullplatform" > "$BATS_TEST_TMPDIR/liquibase-applied"
   prepare_fetched_repo
   run_step prepare_migrations
-  run_step move_migrations_to_history
+  run_step_with_mocked_liquibase run_migrations
   [ "$status" -eq 0 ]
-  run grep -c "^curl " "$MOCK_LOG"
-  [ "$output" = "0" ]
-}
-
-@test "apply moves the executed scripts to history on main in one push" {
-  prepare_fetched_repo
-  run_step prepare_migrations
-  timestamp=$(cat "$MIGRATIONS_DIR/timestamp")
-  run_step move_migrations_to_history
+  [[ "$output" == *"Scripts not yet applied on app_42:"$'\n'"  - 02_alter_t1.sql"$'\n'"SQL that the update runs:"* ]] || false
+  [ "$(calls_matching '^liquibase .* update$')" -eq 1 ]
+  run_step write_migration_results
   [ "$status" -eq 0 ]
-  run grep -c '^curl-request POST .*"permissions":{"contents":"write"}' "$MOCK_LOG"
+  run grep -c 'np service action update --results {"mode":"apply","commit":"0123456789abcdef0123456789abcdef01234567","scripts":\["02_alter_t1.sql"\]}$' "$MOCK_LOG"
   [ "$output" = "1" ]
-  run grep -c "git clone --quiet --depth 1 --branch main " "$MOCK_LOG"
-  [ "$output" = "1" ]
-  [ -f "$MIGRATIONS_DIR/history-repo/qas/app_42/history/01_create_t1_0123456789ab_${timestamp}.sql" ]
-  [ -f "$MIGRATIONS_DIR/history-repo/qas/app_42/history/02_alter_t1_0123456789ab_${timestamp}.sql" ]
-  [ ! -f "$MIGRATIONS_DIR/history-repo/qas/app_42/01_create_t1.sql" ]
-  [ ! -f "$MIGRATIONS_DIR/history-repo/qas/app_42/02_alter_t1.sql" ]
-  run grep -c "commit --quiet -m chore(migrations): move 2 script(s) of qas/app_42 to history after 0123456789ab " "$MOCK_LOG"
-  [ "$output" = "1" ]
-  run grep -c "push --quiet origin HEAD:refs/heads/main auth=x-access-token:$TEST_TOKEN" "$MOCK_LOG"
-  [ "$output" = "1" ]
-  run cat "$MIGRATIONS_DIR/history_commit"
-  [ "$output" = "0123456789abcdef0123456789abcdef01234567" ]
 }
 
-@test "scripts already in history count as moved instead of failing the retry" {
-  export GIT_NOTHING_STAGED=1
+@test "when every script already ran apply succeeds without rendering or updating anything" {
+  printf 'qas/app_42/changelog::01_create_t1::nullplatform\nqas/app_42/changelog::02_alter_t1::nullplatform\n' > "$BATS_TEST_TMPDIR/liquibase-applied"
   prepare_fetched_repo
   run_step prepare_migrations
-  run_step move_migrations_to_history
+  run_step_with_mocked_liquibase run_migrations
   [ "$status" -eq 0 ]
-  [[ "$output" == *"already in history on main"* ]] || false
-  run grep -cE "^git .*(commit|push) " "$MOCK_LOG"
-  [ "$output" = "0" ]
+  [[ "$output" == *"Nothing to apply: every script in qas/app_42 already ran on app_42."* ]] || false
+  [[ "$output" == *NEXT_STEP_RAN* ]] || false
+  [ "$(calls_matching '^liquibase .* update')" -eq 0 ]
+  run_step write_migration_results
+  run grep -c '"scripts":\[\]}$' "$MOCK_LOG"
+  [ "$output" = "1" ]
 }
 
-@test "a symbolic link on the history branch stops the move" {
-  ln -s /tmp "$FIXTURE_REPO/qas/app_42/history/linked"
+@test "a liquibase status that cannot be read fails instead of applying nothing" {
+  printf 'something unexpected\n     qas/app_42/changelog::01_create_t1::nullplatform\n' > "$BATS_TEST_TMPDIR/liquibase-status"
   prepare_fetched_repo
-  rm "$MIGRATIONS_DIR/repo/qas/app_42/history/linked"
   run_step prepare_migrations
-  run_step move_migrations_to_history
+  run_step_with_mocked_liquibase run_migrations
   [ "$status" -ne 0 ]
-  [[ "$output" == *"My-Org/abc-databases@main contains symbolic links"* ]] || false
-  run grep -c "push --quiet" "$MOCK_LOG"
-  [ "$output" = "0" ]
+  [[ "$output" == *"could not read the pending changesets from liquibase status"* ]] || false
+  [ "$(calls_matching '^liquibase .* update')" -eq 0 ]
 }
 
-@test "a rejected push is retried from a fresh clone" {
-  export GIT_PUSH_FAILURES=1
-  make_git_mock
+@test "a liquibase status whose count disagrees with the listed changesets fails" {
+  printf '2 changesets have not been applied to @jdbc:sqlserver://db\n     qas/app_42/changelog::01_create_t1::nullplatform\n' > "$BATS_TEST_TMPDIR/liquibase-status"
   prepare_fetched_repo
   run_step prepare_migrations
-  run_step move_migrations_to_history
-  [ "$status" -eq 0 ]
-  run grep -c "^git clone .*history-repo" "$MOCK_LOG"
-  [ "$output" = "2" ]
-}
-
-@test "a push that keeps failing lists the scripts to move by hand" {
-  export GIT_PUSH_FAILURES=5
-  make_git_mock
-  prepare_fetched_repo
-  run_step prepare_migrations
-  run_step move_migrations_to_history
+  run_step_with_mocked_liquibase run_migrations
   [ "$status" -ne 0 ]
-  [[ "$output" == *"  - 01_create_t1.sql"* ]] || false
-  [[ "$output" == *"move them to history by hand before the next run"* ]] || false
-  run grep -c "push --quiet" "$MOCK_LOG"
-  [ "$output" = "3" ]
+  [[ "$output" == *"could not read the pending changesets from liquibase status"* ]] || false
+  [ "$(calls_matching '^liquibase .* update')" -eq 0 ]
 }
 
-@test "losing write access after the update says the scripts ran and are still pending" {
-  export CURL_WRITE_TOKEN_STATUS=422
+@test "results report the mode, commit and scripts, never the SQL, then clean the work dir" {
   prepare_fetched_repo
   run_step prepare_migrations
-  run_step move_migrations_to_history
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"GitHub refused a contents:write token"* ]] || false
-  [[ "$output" == *"ran on app_42 but are still pending in qas/app_42"* ]] || false
-  [[ "$output" == *"  - 02_alter_t1.sql"* ]] || false
-}
-
-@test "results report the mode, commit, scripts and history commit, never the SQL, then clean the work dir" {
-  prepare_fetched_repo
-  run_step prepare_migrations
-  echo "0123456789abcdef" > "$MIGRATIONS_DIR/history_commit"
+  printf '01_create_t1.sql\n02_alter_t1.sql\n' > "$MIGRATIONS_DIR/pending.txt"
   echo "CREATE LOGIN x WITH PASSWORD = 'secret';" > "$MIGRATIONS_DIR/preview.sql"
   run_step write_migration_results
   [ "$status" -eq 0 ]
-  run grep -c 'np service action update --results {"mode":"apply","commit":"0123456789abcdef0123456789abcdef01234567","scripts":\["01_create_t1.sql","02_alter_t1.sql"\],"history_commit":"0123456789abcdef"}$' "$MOCK_LOG"
+  run grep -c 'np service action update --results {"mode":"apply","commit":"0123456789abcdef0123456789abcdef01234567","scripts":\["01_create_t1.sql","02_alter_t1.sql"\]}$' "$MOCK_LOG"
   [ "$output" = "1" ]
   [ ! -d "$MIGRATIONS_DIR" ]
 }
@@ -570,18 +513,20 @@ MOCK
   [[ "$output" == *"directory qas/custom_dir,"* ]] || false
   run_step prepare_migrations
   [ "$status" -eq 0 ]
-  [ "$(cat "$OUTPUT_DIR/migrations/pending.txt")" = "01_custom.sql" ]
+  [ "$(cat "$OUTPUT_DIR/migrations/scripts.txt")" = "01_custom.sql" ]
 }
 
-@test "preview results carry an empty history commit" {
+@test "preview results list the scripts that would run" {
   set_migration_parameters '{"mode":"preview"}'
   run_step fetch_migrations
   [ "$status" -eq 0 ]
   run_step prepare_migrations
   [ "$status" -eq 0 ]
+  run_step_with_mocked_liquibase run_migrations
+  [ "$status" -eq 0 ]
   run_step write_migration_results
   [ "$status" -eq 0 ]
-  run grep -c 'np service action update --results {"mode":"preview","commit":"0123456789abcdef0123456789abcdef01234567","scripts":\["01_create_t1.sql","02_alter_t1.sql"\],"history_commit":""}$' "$MOCK_LOG"
+  run grep -c 'np service action update --results {"mode":"preview","commit":"0123456789abcdef0123456789abcdef01234567","scripts":\["01_create_t1.sql","02_alter_t1.sql"\]}$' "$MOCK_LOG"
   [ "$output" = "1" ]
 }
 

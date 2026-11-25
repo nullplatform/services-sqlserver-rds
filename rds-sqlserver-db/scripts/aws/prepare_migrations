@@ -15,6 +15,7 @@ export LC_ALL=C
 SOURCE_DIR="${MIGRATIONS_DIR}/repo/${SCRIPTS_PATH}"
 STAGE_DIR="${MIGRATIONS_DIR}/stage"
 mkdir -p "$STAGE_DIR"
+: > "${MIGRATIONS_DIR}/scripts.txt"
 : > "${MIGRATIONS_DIR}/pending.txt"
 
 for file in "$SOURCE_DIR"/*.sql; do
@@ -23,18 +24,18 @@ for file in "$SOURCE_DIR"/*.sql; do
   case "$name" in
     changelog*) continue ;;
   esac
-  echo "$name" >> "${MIGRATIONS_DIR}/pending.txt"
+  echo "$name" >> "${MIGRATIONS_DIR}/scripts.txt"
 done
 
-if ! has_pending_migrations; then
-  echo "No pending scripts in ${SCRIPTS_PATH} at ${MIGRATIONS_BRANCH} ($(migrations_commit_label)): nothing to apply. Scripts under history/ already ran."
+if ! has_migration_scripts; then
+  echo "No scripts in ${SCRIPTS_PATH} at ${MIGRATIONS_BRANCH} ($(migrations_commit_label)): nothing to apply."
   exit 0
 fi
 
-echo "Pending scripts in ${SCRIPTS_PATH}:"
-sed 's/^/  - /' "${MIGRATIONS_DIR}/pending.txt"
+echo "Scripts in ${SCRIPTS_PATH}:"
+sed 's/^/  - /' "${MIGRATIONS_DIR}/scripts.txt"
 
-INVALID=$(grep -Ev '^[0-9]{2}_[A-Za-z0-9._-]+\.sql$' "${MIGRATIONS_DIR}/pending.txt" || true)
+INVALID=$(grep -Ev '^[0-9]{2}_[A-Za-z0-9._-]+\.sql$' "${MIGRATIONS_DIR}/scripts.txt" || true)
 if [ -n "$INVALID" ]; then
   die "script names must look like NN_description.sql (two digits, underscore, letters, digits, '.', '_' or '-'): $(echo "$INVALID" | paste -sd, -)"
 fi
@@ -46,7 +47,7 @@ while IFS= read -r name; do
   if [ -n "$found" ]; then
     VIOLATIONS="${VIOLATIONS}  - ${name}: ${found}"$'\n'
   fi
-done < "${MIGRATIONS_DIR}/pending.txt"
+done < "${MIGRATIONS_DIR}/scripts.txt"
 
 if [ -n "$VIOLATIONS" ]; then
   echo "Forbidden commands found (GRANT CONNECT is blocked everywhere; DROP, TRUNCATE and SELECT * outside dev):" >&2
@@ -60,28 +61,21 @@ while IFS= read -r name; do
   fi
   copy_without_bom "${SOURCE_DIR}/${name}" "${STAGE_DIR}/${name}" \
     || die "could not stage ${name}"
-done < "${MIGRATIONS_DIR}/pending.txt"
+done < "${MIGRATIONS_DIR}/scripts.txt"
 
-TIMESTAMP=$(date -u +%Y%m%d%H%M%S)
-echo "$TIMESTAMP" > "${MIGRATIONS_DIR}/timestamp"
-
+RUN_ON_CHANGE=false
 if [ "$ENVIRONMENT_DIRECTORY" = "dev" ]; then
-  ID_SUFFIX="$TIMESTAMP"
   RUN_ON_CHANGE=true
-else
-  ID_SUFFIX=$(migrations_commit_label) || die "could not read the commit the scripts were cloned from"
-  RUN_ON_CHANGE=false
 fi
 
 jq -R -s \
-  --arg suffix "$ID_SUFFIX" \
   --arg logical "${SCRIPTS_PATH}/changelog" \
   --argjson run_on_change "$RUN_ON_CHANGE" \
   '{
     databaseChangeLog: [
       split("\n")[] | select(length > 0) | {
         changeSet: {
-          id: "\(sub("\\.sql$"; ""))_\($suffix)",
+          id: sub("\\.sql$"; ""),
           author: "nullplatform",
           logicalFilePath: $logical,
           runOnChange: $run_on_change,
@@ -100,7 +94,7 @@ jq -R -s \
         }
       }
     ]
-  }' "${MIGRATIONS_DIR}/pending.txt" > "${MIGRATIONS_DIR}/changelog.json"
+  }' "${MIGRATIONS_DIR}/scripts.txt" > "${MIGRATIONS_DIR}/changelog.json"
 
 COUNT=$(jq '.databaseChangeLog | length' "${MIGRATIONS_DIR}/changelog.json")
-echo "Changelog generated with ${COUNT} changeset(s) (id suffix ${ID_SUFFIX}, runOnChange ${RUN_ON_CHANGE})."
+echo "Changelog generated with ${COUNT} changeset(s) (runOnChange ${RUN_ON_CHANGE})."

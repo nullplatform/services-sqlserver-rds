@@ -49,10 +49,6 @@ steps:
     type: script
     file: $SERVICE_PATH/scripts/aws/run_migrations
 
-  - name: move migrations to history
-    type: script
-    file: $SERVICE_PATH/scripts/aws/move_migrations_to_history
-
   - name: write migration results
     type: script
     file: $SERVICE_PATH/scripts/aws/write_migration_results
