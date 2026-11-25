@@ -10,6 +10,7 @@
 * the install module subscribes the agent channel to `telemetry` notifications
 * `rds-sqlserver-db` has a `run-migrations` action that runs the pending scripts of the application's `<sigla>-databases` repository with Liquibase and moves them to `history/`
 * each `rds-sqlserver-db` database gets a migrations user that is `db_owner` of that database only
+* `rds-sqlserver-db` has a `migrations_directory` attribute that names its scripts directory in the repository, the database name when empty
 
 ## [0.5.1](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.5.0...v0.5.1) (2026-11-23)
 

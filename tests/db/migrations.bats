@@ -158,10 +158,10 @@ setup() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"environment dimension '../etc' must be a single directory name"* ]] || false
 
-  set_migration_parameters '{"mode":"apply","database_directory":"../x"}'
-  run_step fetch_migrations
+  set_migration_parameters '{"mode":"apply"}'
+  MIGRATIONS_DIRECTORY="../x" run_step fetch_migrations
   [ "$status" -ne 0 ]
-  [[ "$output" == *"database_directory '../x' must be a single directory name"* ]] || false
+  [[ "$output" == *"migrations_directory attribute '../x' must be a single directory name"* ]] || false
   run grep -c "^curl " "$MOCK_LOG"
   [ "$output" = "0" ]
 }
@@ -560,12 +560,14 @@ MOCK
   chmod +x "$MOCK_BIN/mise"
 }
 
-@test "a database_directory parameter replaces the database name as the scripts directory" {
+@test "the migrations_directory attribute replaces the database name as the scripts directory" {
   mkdir -p "$FIXTURE_REPO/qas/custom_dir"
   printf 'SELECT 1;\n' > "$FIXTURE_REPO/qas/custom_dir/01_custom.sql"
-  set_migration_parameters '{"mode":"preview","database_directory":"custom_dir"}'
+  export MIGRATIONS_DIRECTORY="custom_dir"
+  set_migration_parameters '{"mode":"preview","database_directory":"ignored_dir"}'
   run_step fetch_migrations
   [ "$status" -eq 0 ]
+  [[ "$output" == *"directory qas/custom_dir,"* ]] || false
   run_step prepare_migrations
   [ "$status" -eq 0 ]
   [ "$(cat "$OUTPUT_DIR/migrations/pending.txt")" = "01_custom.sql" ]

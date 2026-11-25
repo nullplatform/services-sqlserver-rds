@@ -73,17 +73,17 @@ The scripts always come from the `main` branch of the application's own
 first `-` (namespace `abcd-payments` → `abcd-databases`), and the org is
 `migrations_github_org` in `values.yaml`, or the only org the agent has a
 GitHub App for. The environment directory is the service's `environment`
-dimension. The repository follows this layout:
+dimension, and the directory under it is the service's `migrations_directory`
+attribute, or the database name when it is empty. The repository follows this
+layout:
 
 ```
-<environment>/<database>/NN_description.sql   pending
-<environment>/<database>/history/             already ran
+<environment>/<migrations_directory>/NN_description.sql   pending
+<environment>/<migrations_directory>/history/             already ran
 ```
 
-| Parameter | Meaning |
-|---|---|
-| `mode` | `preview` validates and prints the SQL; `apply` runs it |
-| `database_directory` | defaults to the database name |
+The only parameter is `mode`: `preview` validates and prints the SQL; `apply`
+runs it.
 
 `apply` runs the pending scripts in name order, then moves them to
 `history/<name>_<commit>_<timestamp>.sql` on `main` in a single commit. Each

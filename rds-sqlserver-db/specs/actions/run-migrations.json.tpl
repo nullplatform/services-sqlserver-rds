@@ -25,12 +25,6 @@
               "title": "Apply: run the scripts and move them to history on main"
             }
           ]
-        },
-        "database_directory": {
-          "type": "string",
-          "title": "Database directory",
-          "description": "Directory under the environment that holds this database's scripts. Defaults to the database name",
-          "pattern": "^[A-Za-z0-9_-]+$"
         }
       }
     },

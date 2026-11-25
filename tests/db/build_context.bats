@@ -26,6 +26,10 @@ MOCK
   cat > "$MOCK_BIN/np" <<MOCK
 #!/usr/bin/env bash
 echo "np \$*" >> "$MOCK_LOG"
+if [ "\$1 \$2" = "service read" ]; then
+  echo "\${SERVICE_READ_JSON:-{\"attributes\":{}}}"
+  exit 0
+fi
 [ "\$1 \$2" = "provider list" ] || exit 0
 nrn=""
 category=""
@@ -105,4 +109,17 @@ run_and_dump_region() {
   [ "$status" -ne 0 ]
   run grep -c "provider list" "$MOCK_LOG"
   [ "$output" = "0" ]
+}
+
+@test "the migrations directory comes from the service attribute and is empty without it" {
+  export CONTEXT="$(context_json "$ENTITY_NRN" '{"environment":"javi-k8s"}')"
+  export SERVICE_READ_JSON='{"attributes":{"database_name":"app_4","migrations_directory":"payments"}}'
+  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/build_context' >/dev/null 2>&1 || exit 1; echo \"DIR=\$MIGRATIONS_DIRECTORY\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "DIR=payments" ]
+
+  export SERVICE_READ_JSON='{"attributes":{"database_name":"app_4"}}'
+  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/build_context' >/dev/null 2>&1 || exit 1; echo \"DIR=\$MIGRATIONS_DIRECTORY\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "DIR=" ]
 }

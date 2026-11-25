@@ -72,6 +72,14 @@
           "description": "ARN of the Secrets Manager secret holding the app-level credentials (internal use)",
           "order": 7
         },
+        "migrations_directory": {
+          "type": "string",
+          "title": "Migrations directory",
+          "editableOn": ["create", "update"],
+          "description": "Directory under <environment>/ of the <sigla>-databases repository that holds this database's migrations. Defaults to the database name",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "order": 9
+        },
         "migrator_secret_arn": {
           "type": "string",
           "visibleOn": [],

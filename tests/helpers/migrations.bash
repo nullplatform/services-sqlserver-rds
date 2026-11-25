@@ -14,6 +14,7 @@ setup_migrations_env() {
   export SERVER_HOSTNAME="db.example.rds.amazonaws.com"
   export SERVER_PORT="1433"
   export DB_NAME="app_42"
+  unset MIGRATIONS_DIRECTORY
   export DB_USERNAME="app_42"
   export MIGRATOR_SECRET_ARN="arn:aws:secretsmanager:us-east-1:1:secret:nullplatform/rds-sqlserver/np-x/migrator"
   export AWS_ACCESS_KEY_ID="ASIASERVICEROLE"

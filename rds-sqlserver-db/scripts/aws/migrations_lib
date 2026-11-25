@@ -92,7 +92,6 @@ fi
 
 if ! type -t load_migration_parameters >/dev/null 2>&1; then
 load_migration_parameters() {
-  DATABASE_DIRECTORY=$(migration_parameter database_directory)
   MIGRATIONS_MODE=$(migration_parameter mode)
 
   SIGLA=$(resolve_sigla "$CONTEXT")
@@ -100,8 +99,8 @@ load_migration_parameters() {
   GITHUB_ORG=$(migrations_github_org)
   GITHUB_REPOSITORY="${GITHUB_ORG}/$(printf '%s-databases' "$SIGLA" | tr '[:upper:]' '[:lower:]')"
 
-  DATABASE_DIRECTORY="${DATABASE_DIRECTORY:-${DB_NAME:-}}"
-  validate_directory_name "database_directory" "$DATABASE_DIRECTORY"
+  DATABASE_DIRECTORY="${MIGRATIONS_DIRECTORY:-${DB_NAME:-}}"
+  validate_directory_name "migrations_directory attribute" "$DATABASE_DIRECTORY"
 
   case "$MIGRATIONS_MODE" in
     preview|apply) ;;
