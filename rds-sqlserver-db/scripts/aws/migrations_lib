@@ -29,7 +29,7 @@ if ! type -t validate_directory_name >/dev/null 2>&1; then
 validate_directory_name() {
   local label="$1" value="$2"
 
-  if ! printf '%s' "$value" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+  if [[ ! "$value" =~ ^[A-Za-z0-9_-]+$ ]]; then
     die "${label} '${value}' must be a single directory name (letters, digits, '_' or '-')"
   fi
 }

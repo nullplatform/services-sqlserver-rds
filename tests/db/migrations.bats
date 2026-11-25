@@ -527,6 +527,15 @@ MOCK
   [ "$(cat "$OUTPUT_DIR/migrations/scripts.txt")" = "01_custom.sql" ]
 }
 
+@test "a multi-line migrations_directory cannot smuggle a path past validation" {
+  set_migration_parameters '{"mode":"apply"}'
+  MIGRATIONS_DIRECTORY=$'ok\n../../x' run_step fetch_migrations
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must be a single directory name"* ]] || false
+  run grep -c "^curl " "$MOCK_LOG"
+  [ "$output" = "0" ]
+}
+
 @test "preview results list the scripts that would run" {
   set_migration_parameters '{"mode":"preview"}'
   run_step fetch_migrations

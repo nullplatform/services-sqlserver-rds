@@ -24,7 +24,7 @@ validate_identifier() {
     die "${label} is empty"
   fi
 
-  if ! printf '%s' "$value" | grep -Eq '^[A-Za-z][A-Za-z0-9_]{0,63}$'; then
+  if [[ ! "$value" =~ ^[A-Za-z][A-Za-z0-9_]{0,63}$ ]]; then
     die "${label} '${value}' is not a valid SQL Server identifier (letter followed by up to 63 letters, digits or underscores)"
   fi
 }
@@ -57,7 +57,7 @@ validate_password() {
     die "generated password is empty"
   fi
 
-  if ! printf '%s' "$value" | grep -Eq '^[A-Za-z0-9]{16,128}$'; then
+  if [[ ! "$value" =~ ^[A-Za-z0-9]{16,128}$ ]]; then
     die "generated password contains characters that are unsafe to substitute into T-SQL; db_setup must keep random_password.special = false"
   fi
 }

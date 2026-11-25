@@ -12,6 +12,10 @@
 * each `rds-sqlserver-db` database gets a migrations user that is `db_owner` of that database only
 * `rds-sqlserver-db` has a `migrations_directory` attribute that names its scripts directory in the repository, the database name when empty
 
+### Bug Fixes
+
+* database names, usernames, passwords and migration directories that contain a line break are rejected instead of passing validation
+
 ## [0.5.1](https://github.com/nullplatform/services-sqlserver-rds/compare/v0.5.0...v0.5.1) (2026-11-23)
 
 

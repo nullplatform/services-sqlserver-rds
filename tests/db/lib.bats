@@ -52,6 +52,16 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
+@test "validate_identifier rejects a second line smuggled after a valid name" {
+  run validate_identifier "database name" $'app_1\nDROP'
+  [ "$status" -ne 0 ]
+}
+
+@test "validate_password rejects a second line smuggled after a valid password" {
+  run validate_password $'aB3dEfGhIjKlMnOpQrStUvWxYz012345\n\'; DROP LOGIN sa--'
+  [ "$status" -ne 0 ]
+}
+
 @test "validate_identifier rejects a hyphenated name" {
   run validate_identifier "database name" "app-123"
   [ "$status" -ne 0 ]
