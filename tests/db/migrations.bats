@@ -373,6 +373,17 @@ setup() {
   [ "$output" = "0" ]
 }
 
+@test "the rendered SQL is printed without the connection URL header" {
+  set_migration_parameters '{"mode":"preview"}'
+  prepare_fetched_repo
+  run_step prepare_migrations
+  run_step_with_mocked_liquibase run_migrations
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CREATE TABLE t1 (id INT);"* ]] || false
+  [[ "$output" != *"-- Against:"* ]] || false
+  [[ "$output" != *"jdbc:sqlserver://"* ]] || false
+}
+
 @test "apply runs update as the migrations user against the service database" {
   prepare_fetched_repo
   run_step prepare_migrations

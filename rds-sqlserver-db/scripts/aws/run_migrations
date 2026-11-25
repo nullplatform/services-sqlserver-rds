@@ -67,7 +67,7 @@ sed 's/^/  - /' "${MIGRATIONS_DIR}/pending.txt"
 echo "SQL that the update runs:"
 liquibase update-sql --output-file="${MIGRATIONS_DIR}/preview.sql" \
   || die "liquibase update-sql failed: see the error above"
-cat "${MIGRATIONS_DIR}/preview.sql"
+sed '/^-- Against: /d' "${MIGRATIONS_DIR}/preview.sql"
 
 if [ "$MIGRATIONS_MODE" = "apply" ]; then
   echo "Applying the changesets..."

@@ -211,7 +211,7 @@ if [ "\$command" = "status" ]; then
   [ "\$count" -eq 0 ] || sed 's/^/     /' <<< "\$pending"
   exit 0
 fi
-[ -n "\$output_file" ] && echo "CREATE TABLE t1 (id INT);" > "\$output_file"
+[ -n "\$output_file" ] && printf -- '-- Against: app_42_mig@jdbc:sqlserver://db.example.rds.amazonaws.com:1433;databaseName=app_42;\nCREATE TABLE t1 (id INT);\n' > "\$output_file"
 exit 0
 MOCK
   chmod +x "$MOCK_BIN/liquibase"
