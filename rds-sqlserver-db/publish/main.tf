@@ -35,9 +35,10 @@ module "publish" {
   # the copies organizations registered from this repository: agent channels
   # route by specification slug, so the two must differ to live in one
   # organization. The specification keeps the plain name people read.
-  package_slug     = "np-rds-sqlserver-db"
-  service_name     = "RDS SQL Server DB"
-  service_path     = "rds-sqlserver-db"
-  image_repository = "nullplatform/agent-plugins/services/rds-sqlserver-db"
-  local_specs_path = abspath("${path.module}/..")
+  package_slug      = "np-rds-sqlserver-db"
+  service_name      = "RDS SQL Server DB"
+  service_path      = "rds-sqlserver-db"
+  available_actions = ["run-migrations"]
+  image_repository  = "nullplatform/agent-plugins/services/rds-sqlserver-db"
+  local_specs_path  = abspath("${path.module}/..")
 }
