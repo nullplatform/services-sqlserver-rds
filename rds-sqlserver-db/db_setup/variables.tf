@@ -40,7 +40,7 @@ variable "master_secret_arn" {
   description = "ARN of the Secrets Manager secret holding the server master credentials"
 }
 
-variable "migrator_username" {
+variable "rds_instance_identifier" {
   type        = string
-  description = "Login and database user name that runs migrations, db_owner on this database only"
+  description = "Identifier of the RDS instance this database lives on"
 }

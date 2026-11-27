@@ -16,7 +16,7 @@ fi
 
 validate_identifier "database name" "$DB_NAME"
 validate_identifier "database username" "$DB_USERNAME"
-MIGRATOR_USERNAME=$(migrator_username_for "$DB_USERNAME")
+MIGRATOR_USERNAME=$(migrator_username_for "$DB_NAME")
 
 fetch_master_credentials "$MASTER_SECRET_ARN"
 

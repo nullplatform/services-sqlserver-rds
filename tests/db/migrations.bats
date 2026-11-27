@@ -475,12 +475,17 @@ setup() {
   [ ! -d "$MIGRATIONS_DIR" ]
 }
 
-@test "a long app user still yields a valid migrations user, so delete never blocks on it" {
-  long_user="a$(printf 'b%.0s' $(seq 1 63))"
-  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/lib'; migrator_username_for '$long_user'"
+@test "the migrations user of the longest database name stays within the SQL Server login limit" {
+  long_name="a$(printf 'b%.0s' $(seq 1 63))"
+  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/lib'; migrator_username_for '$long_name'"
   [ "$status" -eq 0 ]
-  [ "${#output}" -eq 64 ]
-  [[ "$output" == *_mig ]]
+  [ "$output" = "migrator_user_${long_name}" ]
+  [ "${#output}" -le 128 ]
+}
+
+@test "the migrations user is refused for a database name that is not an identifier" {
+  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/lib'; migrator_username_for 'app]; DROP LOGIN [x'"
+  [ "$status" -ne 0 ]
 }
 
 make_liquibase_mise_mock() {

@@ -62,9 +62,11 @@ schema migrations.
 ## Migrations
 
 The `run-migrations` action runs the `.sql` scripts of a GitHub repository with
-Liquibase, as a dedicated **migrations user** (`<app user>_mig`) that is
-`db_owner` of this database and has no server-level role. Its credentials live
-in `nullplatform/rds-sqlserver/<service slug>-<service id>/migrator`. Services
+Liquibase, as a dedicated **migrations user** (`migrator_user_<database>`) that
+is `db_owner` of this database and has no server-level role. Its credentials
+live only in `nullplatform/rds-sqlserver/<RDS instance identifier>/<database>/migrator`:
+the password is generated as an ephemeral value and never reaches the tofu
+state. A deleted secret is kept for 7 days before AWS removes it. Services
 created before this action get the user on their next `update`; until then the
 action asks for one.
 

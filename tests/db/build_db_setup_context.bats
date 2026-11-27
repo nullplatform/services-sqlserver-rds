@@ -58,11 +58,24 @@ run_and_dump() {
   [[ "$output" == *"-var=db_username=app_42"* ]]
 }
 
-@test "the migrations user name is derived from the app user and passed to db_setup" {
+@test "the migrations user name is derived from the database name" {
   run bash -c "source '$DB_SERVICE_PATH/scripts/aws/build_db_setup_context' >/dev/null 2>&1; echo \"MIGRATOR_USERNAME=\$MIGRATOR_USERNAME\"; echo \"TOFU_VARIABLES=\$TOFU_VARIABLES\""
   [ "$status" -eq 0 ]
-  [[ "$output" == *"MIGRATOR_USERNAME=app_42_mig"* ]] || false
-  [[ "$output" == *"-var=migrator_username=app_42_mig "* ]]
+  [[ "$output" == *"MIGRATOR_USERNAME=migrator_user_app_42"* ]] || false
+  [[ "$output" != *"migrator_username"* ]]
+}
+
+@test "the RDS instance identifier is read from the server hostname and passed to db_setup" {
+  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/build_db_setup_context' >/dev/null 2>&1; echo \"TOFU_VARIABLES=\$TOFU_VARIABLES\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-var=rds_instance_identifier=sql "* ]]
+}
+
+@test "a hostname without an RDS instance identifier aborts" {
+  export SERVER_HOSTNAME="10.0.0.5"
+  run bash -c "source '$DB_SERVICE_PATH/scripts/aws/build_db_setup_context'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"could not read the RDS instance identifier from the hostname 10.0.0.5"* ]]
 }
 
 @test "the backend key is namespaced under this instance's prefix" {

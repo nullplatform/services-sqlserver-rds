@@ -43,9 +43,8 @@ fi
 
 if ! type -t migrator_username_for >/dev/null 2>&1; then
 migrator_username_for() {
-  local name="${1:0:60}_mig"
-  validate_identifier "migrations username" "$name"
-  echo "$name"
+  validate_identifier "database name" "$1"
+  echo "migrator_user_$1"
 }
 fi
 

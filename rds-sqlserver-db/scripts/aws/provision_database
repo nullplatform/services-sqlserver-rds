@@ -18,6 +18,27 @@ read_tofu_password() {
   echo "$value"
 }
 
+read_migrator_password() {
+  local secret_arn credentials username password
+
+  secret_arn=$(tofu output -raw migrator_secret_arn 2>/dev/null) \
+    || die "could not read migrator_secret_arn from the db_setup module outputs"
+
+  credentials=$(aws secretsmanager get-secret-value \
+    --secret-id "$secret_arn" \
+    --query 'SecretString' \
+    --output text) || die "could not read the migrations credentials from ${secret_arn}"
+
+  username=$(echo "$credentials" | jq -r '.username // ""')
+  if [ "$username" != "$MIGRATOR_USERNAME" ]; then
+    die "the migrations secret ${secret_arn} is for user '${username}', expected '${MIGRATOR_USERNAME}'"
+  fi
+
+  password=$(echo "$credentials" | jq -r '.password // ""')
+  validate_password "$password"
+  echo "$password"
+}
+
 provision_login() {
   local user="$1" password="$2"
 
@@ -42,7 +63,7 @@ validate_identifier "migrations username" "${MIGRATOR_USERNAME:-}"
 cd "$OUTPUT_DIR"
 
 DB_PASSWORD=$(read_tofu_password db_password)
-MIGRATOR_PASSWORD=$(read_tofu_password migrator_password)
+MIGRATOR_PASSWORD=$(read_migrator_password)
 
 fetch_master_credentials "$MASTER_SECRET_ARN"
 

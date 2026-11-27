@@ -35,14 +35,8 @@ output "app_secret_arn" {
 }
 
 output "migrator_username" {
-  value       = var.migrator_username
+  value       = local.migrator_target_user_name
   description = "Login and database user name that runs migrations"
-}
-
-output "migrator_password" {
-  value       = random_password.migrator.result
-  sensitive   = true
-  description = "Password of the migrations user"
 }
 
 output "migrator_secret_arn" {
